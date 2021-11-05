@@ -8,17 +8,53 @@
 #include <sys/printk.h>
 #include <cmsis_os2.h>
 #include "mctp.h"
+#include "pldm.h"
 
 #define MCTP_SMBUS_NUM 2
+#define MCTP_MAX_MSG_HANDLE 2
+
+#define MCTP_MSG_TYPE_SHIFT 0
+#define MCTP_MSG_TYPE_MASK 0x7F
+#define MCTP_IC_SHIFT 7
+#define MCTP_IC_MASK 0x80
+
+uint8_t mctp_control_cmd_handler(void *mctp_p, uint8_t src_ep, uint8_t *buf, uint32_t len, mctp_medium_ext_param medium_ext_params);
+
+typedef enum {
+	MCTP_MSG_TYPE_CTRL = 0x00,
+	MCTP_MSG_TYPE_PLDM,
+	MCTP_MSG_TYPE_NCSI,
+	MCTP_MSG_TYPE_ETH,
+	MCTP_MSG_TYPE_NVME,
+	MCTP_MSG_TYPE_VEN_DEF_PCI = 0x7E,
+	MCTP_MSG_TYPE_VEN_DEF_IANA = 0x7F
+} MCTP_MSG_TYPE;
 
 typedef struct _mctp_smbus_port {
 	mctp *mctp_inst;
-	mctp_smbus_conf conf;
+	mctp_medium_conf conf;
 } mctp_smbus_port;
 
+/* mctp route entry struct */
+typedef struct _mctp_route_entry {
+    uint8_t endpoint;
+    uint8_t bus; /* TODO: only consider smbus/i3c */
+    uint8_t addr; /* TODO: only consider smbus/i3c */
+} mctp_route_entry;
+
+typedef struct _mctp_msg_handler {
+	MCTP_MSG_TYPE type;
+	mctp_fn_cb msg_handler_cb;
+} mctp_msg_handler;
+
+static mctp_msg_handler cmd_tbl[MCTP_MAX_MSG_HANDLE] = {
+	{MCTP_MSG_TYPE_CTRL, mctp_control_cmd_handler},
+	{MCTP_MSG_TYPE_PLDM, pldm_cmd_handler}
+};
+
 static mctp_smbus_port smbus_port[MCTP_SMBUS_NUM] = {
-	{.conf.addr = 0x20, .conf.bus = 0x01},
-	{.conf.addr = 0x20, .conf.bus = 0x02}
+	{.conf.smbus_conf.addr = 0x20, .conf.smbus_conf.bus = 0x01},
+	{.conf.smbus_conf.addr = 0x20, .conf.smbus_conf.bus = 0x02}
 };
 
 mctp_route_entry mctp_route_tbl[] = {
@@ -37,14 +73,45 @@ static mctp *find_mctp_by_smbus(uint8_t bus)
 	for (i = 0; i < MCTP_SMBUS_NUM; i++) {
 		mctp_smbus_port *p = smbus_port + i;
 		
-		if (bus == p->conf.bus)
+		if (bus == p->conf.smbus_conf.bus)
 			return p->mctp_inst;
 	}
 
 	return NULL;
 }
 
-uint8_t get_route_info(uint8_t dest_endpoint, void **mctp_inst, void **medium_ext_params)
+uint8_t mctp_control_cmd_handler(void *mctp_p, uint8_t src_ep, uint8_t *buf, uint32_t len, mctp_medium_ext_param medium_ext_params)
+{
+	mctp_printf("\n");
+	if (!mctp_p || !buf || !len)
+		return MCTP_ERROR;
+
+	return MCTP_SUCCESS;
+}
+
+uint8_t mctp_msg_recv(void *mctp_p, uint8_t src_ep, uint8_t *buf, uint32_t len, mctp_medium_ext_param medium_ext_params)
+{
+	if (!mctp_p || !buf || !len)
+		return MCTP_ERROR;
+	
+	/* first byte is message type and ic */
+	uint8_t msg_type = (buf[0] & MCTP_MSG_TYPE_MASK) >> MCTP_MSG_TYPE_SHIFT;
+	uint8_t ic = (buf[0] & MCTP_IC_MASK) >> MCTP_IC_SHIFT;
+	(void)ic;
+	
+	uint8_t i;
+	for (i = 0; i < MCTP_MAX_MSG_HANDLE; i++) {
+		if (cmd_tbl[i].type == msg_type) {
+			cmd_tbl[i].msg_handler_cb(mctp_p, src_ep, buf + 1, len - 1, medium_ext_params);
+			break;
+		}
+	}
+
+	return MCTP_SUCCESS;
+}
+
+
+static uint8_t get_route_info(uint8_t dest_endpoint, void **mctp_inst, mctp_medium_ext_param *medium_ext_params)
 {
 	if (!mctp_inst || !medium_ext_params)
 		return MCTP_ERROR;
@@ -56,13 +123,8 @@ uint8_t get_route_info(uint8_t dest_endpoint, void **mctp_inst, void **medium_ex
 		mctp_route_entry *p = mctp_route_tbl + i;
 		if (p->endpoint == dest_endpoint) {
 			*mctp_inst = find_mctp_by_smbus(p->bus);
-			mctp_smbus_ext_param *tmp_ext_param = (mctp_smbus_ext_param *)k_malloc(sizeof(mctp_smbus_ext_param));
-			if (!tmp_ext_param)
-				break;
-			
-			mctp_printf("tmp_ext_param = %p\n", tmp_ext_param);
-			*medium_ext_params = tmp_ext_param;
-			tmp_ext_param->addr = p->addr;
+			medium_ext_params->type = MCTP_MEDIUM_TYPE_SMBUS;
+			medium_ext_params->smbus_ext_param.addr = p->addr;
 			rc = MCTP_SUCCESS;
 			break;
 		} else if (p->endpoint == 0xFF) {
@@ -81,7 +143,7 @@ void main(void)
 	for (i = 0; i < MCTP_SMBUS_NUM; i++) {
 		mctp_smbus_port *p = smbus_port + i;
 		printk("smbus port %d\n", i);
-		printk("bus = %x, addr = %x\n", p->conf.bus, p->conf.addr);
+		printk("bus = %x, addr = %x\n", p->conf.smbus_conf.bus, p->conf.smbus_conf.addr);
 
 		p->mctp_inst = mctp_init();
 		if (!p->mctp_inst) {
@@ -89,76 +151,63 @@ void main(void)
 			continue;
 		}
 
-		uint8_t rc = mctp_set_medium_configure(p->mctp_inst, MCTP_MEDIUM_TYPE_SMBUS, (void *)&p->conf);
+		uint8_t rc = mctp_set_medium_configure(p->mctp_inst, MCTP_MEDIUM_TYPE_SMBUS, p->conf);
 		mctp_printf("mctp_set_medium_configure %s\n", (rc == MCTP_SUCCESS)? "success": "failed");
 
 		if (MCTP_DEBUG) {
 			MCTP_MEDIUM_TYPE medium_type = MCTP_MEDIUM_TYPE_UNKNOWN;
-			void *medium_conf = NULL;
+			mctp_medium_conf medium_conf;
 			rc = mctp_get_medium_configure(p->mctp_inst, &medium_type, &medium_conf);
 			mctp_printf("mctp_get_medium_configure %s\n", (rc == MCTP_SUCCESS)? "success": "failed");
 			mctp_printf("medium_type = %d\n", medium_type);
-
-			mctp_smbus_conf *conf = (mctp_smbus_conf *)medium_conf;
-			if (p)
-				mctp_printf("p = %p, smbus bus = %x, addr = %x\n", conf, conf->bus, conf->addr);
-
-			if (medium_conf)
-				k_free(medium_conf);
+			mctp_printf("smbus bus = %x, addr = %x\n", medium_conf.smbus_conf.bus, medium_conf.smbus_conf.addr);
 		}
 
 		mctp_reg_endpoint_resolve_func(p->mctp_inst, get_route_info);
+		mctp_reg_msg_rx_func(p->mctp_inst, mctp_msg_recv);
 		mctp_start(p->mctp_inst);
 	}
-#if 0
-	mctp *mctp_inst = mctp_init();
-	
-	if (!mctp_inst)
-		return;
-	
-	mctp_printf("mctp_init success!!\n");
-
-	/* configure smbus */
-	mctp_smbus_conf smbus_conf = {0};
-	smbus_conf.addr = 0x20;
-	smbus_conf.bus = 0x01;
-	uint8_t rc = mctp_set_medium_configure(mctp_inst, MCTP_MEDIUM_TYPE_SMBUS, (void *)&smbus_conf);
-	mctp_printf("mctp_set_medium_configure %s\n", (rc == MCTP_SUCCESS)? "success": "failed");
-
-	if (MCTP_DEBUG) {
-		MCTP_MEDIUM_TYPE medium_type = MCTP_MEDIUM_TYPE_UNKNOWN;
-		void *medium_conf = NULL;
-		rc = mctp_get_medium_configure(mctp_inst, &medium_type, &medium_conf);
-		mctp_printf("mctp_get_medium_configure %s\n", (rc == MCTP_SUCCESS)? "success": "failed");
-		mctp_printf("medium_type = %d\n", medium_type);
-
-		if (medium_type == MCTP_MEDIUM_TYPE_SMBUS) {
-			mctp_smbus_conf *p = (mctp_smbus_conf *)medium_conf;
-			if (p)
-				mctp_printf("p = %p, smbus bus = %x, addr = %x\n", p, p->bus, p->addr);
-		}
-
-		if (medium_conf)
-			k_free(medium_conf);
-	}
-
-	mctp_start(mctp_inst);
-#endif
 
 	while (1) {
 		i++;
 		k_msleep(1000000);
 #if 0
 		if (!(i % 1000)) {
-			uint8_t buf[65] = {1, 2, 3, 7, 8, 9};
-			mctp_smbus_ext_param smbus_ext_param = {.addr = 0x80};
-			mctp_send_msg(smbus_port[0].mctp_inst, i % 16, buf, sizeof(buf), 1, &smbus_ext_param);
+			uint8_t buf[] = {0x01,0x00,0x05,0x15,0x00,0x22,0x00,0x00,0xEA,
+				0x03,0xA5,0xEA,0x5A,0xA5,0xEA,0x5A,0xA5,0xEA,0x5A,0xA5,0x5A,0x77,0x46,0x74,0x41,
+				0x28,0x00,0x00,0x00,0xE5,0xD0,0xE4,0xDC,0x00,0x02,0x02,0x91,0x01,0x00,0xFF,0xFF,
+				0x00,0x00,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x3C,0x00,0x00,0x00,0xC0,0xD8,0x06,0x00,
+				0x7C,0x05,0x00,0x00,0xC0,0xD8,0x06,0x00,0x64
+			};
+			mctp_medium_ext_param med_ext_param = {0};
+			med_ext_param.type = MCTP_MEDIUM_TYPE_SMBUS;
+			med_ext_param.smbus_ext_param.addr = 0x80;
+			mctp_send_msg(smbus_port[0].mctp_inst, 6, buf, sizeof(buf), 1, med_ext_param);
 		}
 
 		if (!(i % 2000)) {
-			uint8_t buf[65] = {9, 8, 7, 3, 2, 1};
-			mctp_smbus_ext_param smbus_ext_param = {.addr = 0x60};
-			mctp_send_msg(smbus_port[1].mctp_inst, i % 8, buf, sizeof(buf), 1, &smbus_ext_param);
+			uint8_t buf[] = {0x01,0x00,0x05,0x15,0x00,0x22,0x00,0x00,0xEA,
+				0x03,0xA5,0xEA,0x5A,0xA5,0xEA,0x5A,0xA5,0xEA,0x5A,0xA5,0x5A,0x77,0x46,0x74,0x41,
+				0x28,0x00,0x00,0x00,0xE5,0xD0,0xE4,0xDC,0x00,0x02,0x02,0x91,0x01,0x00,0xFF,0xFF,
+				0x00,0x00,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x3C,0x00,0x00,0x00,0xC0,0xD8,0x06,0x00,
+				0x7C,0x05,0x00,0x00,0xC0,0xD8,0x06,0x00,0x65,0x01,0x00,0x05,0x15,0x00,0x22,0x00,0x00,0xEA,
+				0x03,0xA5,0xEA,0x5A,0xA5,0xEA,0x5A,0xA5,0xEA,0x5A,0xA5,0x5A,0x77,0x46,0x74,0x41,
+				0x28,0x00,0x00,0x00,0xE5,0xD0,0xE4,0xDC,0x00,0x02,0x02,0x91,0x01,0x00,0xFF,0xFF,
+				0x00,0x00,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x3C,0x00,0x00,0x00,0xC0,0xD8,0x06,0x00,
+				0x7C,0x05,0x00,0x00,0xC0,0xD8,0x06,0x00,0x65,0x01,0x00,0x05,0x15,0x00,0x22,0x00,0x00,0xEA,
+				0x03,0xA5,0xEA,0x5A,0xA5,0xEA,0x5A,0xA5,0xEA,0x5A,0xA5,0x5A,0x77,0x46,0x74,0x41,
+				0x28,0x00,0x00,0x00,0xE5,0xD0,0xE4,0xDC,0x00,0x02,0x02,0x91,0x01,0x00,0xFF,0xFF,
+				0x00,0x00,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x3C,0x00,0x00,0x00,0xC0,0xD8,0x06,0x00,
+				0x7C,0x05,0x00,0x00,0xC0,0xD8,0x06,0x00,0x65,0x01,0x00,0x05,0x15,0x00,0x22,0x00,0x00,0xEA,
+				0x03,0xA5,0xEA,0x5A,0xA5,0xEA,0x5A,0xA5,0xEA,0x5A,0xA5,0x5A,0x77,0x46,0x74,0x41,
+				0x28,0x00,0x00,0x00,0xE5,0xD0,0xE4,0xDC,0x00,0x02,0x02,0x91,0x01,0x00,0xFF,0xFF,
+				0x00,0x00,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x3C,0x00,0x00,0x00,0xC0,0xD8,0x06,0x00,
+				0x7C,0x05,0x00,0x00,0xC0,0xD8,0x06,0x00,0x65
+			};
+			mctp_medium_ext_param med_ext_param = {0};
+			med_ext_param.type = MCTP_MEDIUM_TYPE_SMBUS;
+			med_ext_param.smbus_ext_param.addr = 0x60;
+			mctp_send_msg(smbus_port[1].mctp_inst, 7, buf, sizeof(buf), 1, med_ext_param);
 		}
 #endif
 	}

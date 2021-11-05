@@ -11,11 +11,26 @@
 #define MCTP_DEFAULT_THREAD_PRIORITY osPriorityNormal
 #define MCTP_TX_QUEUE_SIZE 16
 
-typedef struct _mctp_hdr {
+#define MCTP_HDR_HDR_VER 0x01
+#define MCTP_HDR_SEQ_MASK 0x03
+#define MCTP_HDR_TAG_MASK 0x07
+#define MCTP_HDR_TAG_MAX 0x07
+
+typedef struct __attribute__((packed)) {
     uint8_t hdr_ver;
     uint8_t dest_ep;
     uint8_t src_ep;
-    uint8_t flags_seq_to_tag;
+    union {
+        struct {
+            uint8_t msg_tag : 3;
+            uint8_t to : 1;
+            uint8_t pkt_seq : 2;
+            uint8_t eom : 1;
+            uint8_t som : 1;
+
+        };
+        uint8_t flags_seq_to_tag;
+    };
 } mctp_hdr;
 
 /* set thread name */
@@ -27,11 +42,8 @@ static uint8_t set_thread_name(mctp *mctp_inst)
     if (mctp_inst->medium_type <= MCTP_MEDIUM_TYPE_UNKNOWN || mctp_inst->medium_type >= MCTP_MEDIUM_TYPE_MAX)
         return MCTP_ERROR;
 
-    if (!mctp_inst->medium_conf)
-        return MCTP_ERROR;
-
     if (mctp_inst->medium_type == MCTP_MEDIUM_TYPE_SMBUS) {
-        mctp_smbus_conf *smbus_conf = (mctp_smbus_conf *)mctp_inst->medium_conf;
+        mctp_smbus_conf *smbus_conf = (mctp_smbus_conf *)&mctp_inst->medium_conf;
         snprintf(mctp_inst->mctp_rx_task_name, sizeof(mctp_inst->mctp_rx_task_name), 
             "mctprx_%02x_%02x_%02x", mctp_inst->medium_type, smbus_conf->bus, smbus_conf->addr);
         snprintf(mctp_inst->mctp_tx_task_name, sizeof(mctp_inst->mctp_tx_task_name), 
@@ -42,7 +54,7 @@ static uint8_t set_thread_name(mctp *mctp_inst)
 }
 
 /* init the medium related resources */
-static uint8_t mctp_medium_init(mctp *mctp_inst, void *medium_conf)
+static uint8_t mctp_medium_init(mctp *mctp_inst, mctp_medium_conf medium_conf)
 {
     if (!mctp_inst)
         return MCTP_ERROR;
@@ -75,6 +87,30 @@ static uint8_t mctp_medium_deinit(mctp *mctp_inst)
     return MCTP_SUCCESS;
 }
 
+static uint8_t bridge_msg(mctp *mctp_inst, uint8_t *buf, uint16_t len)
+{
+    if (!mctp_inst || !buf || !len)
+        return MCTP_ERROR;
+
+    if (!mctp_inst->ep_resolve)
+        return MCTP_ERROR;
+    
+    mctp *target_mctp = NULL;
+    mctp_medium_ext_param target_medium_ext_params;
+    memset(&target_medium_ext_params, 0, sizeof(target_medium_ext_params));
+
+    mctp_hdr *hdr = (mctp_hdr *)buf;
+    uint8_t rc = mctp_inst->ep_resolve(hdr->dest_ep, (void **)&target_mctp, &target_medium_ext_params);
+    if (rc != MCTP_SUCCESS) {
+        mctp_printf("can't bridge endpoint %x\n", hdr->dest_ep);
+        return MCTP_ERROR;
+    }
+
+    mctp_printf("rc = %d, bridget msg to mctp = %p\n", rc, target_mctp);
+    mctp_bridge_msg(target_mctp, buf, len, target_medium_ext_params);
+    return MCTP_SUCCESS;
+}
+
 /* mctp rx task */
 static void mctp_rx_task(void *arg)
 {
@@ -95,40 +131,37 @@ static void mctp_rx_task(void *arg)
 
         uint8_t i = 0;
         while (1) {
-            k_msleep(100000000);
+            k_msleep(1000000);
             if (!(++i % 16))
                 break;
         }
             
-        uint8_t read_buf[mctp_inst->max_msg_size + MCTP_META_INFO_SIZE];
-        memset(read_buf, 0, sizeof(read_buf));
-
-        uint16_t read_len = mctp_inst->read_data(mctp_inst, read_buf, sizeof(read_buf), NULL);
+        uint8_t read_buf[256] = {0};
+        mctp_medium_ext_param medium_ext_param;
+        memset(&medium_ext_param, 0, sizeof(medium_ext_param));
+        uint16_t read_len = mctp_inst->read_data(mctp_inst, read_buf, sizeof(read_buf), &medium_ext_param);
         if (!read_len)
             continue;
         mctp_printf("mctp_inst %p, read_len = %d\n", mctp_inst, read_len);
+        if (1) {
+            print_data_hex(read_buf, read_len);
+        }
         
         mctp_hdr *hdr = (mctp_hdr *)read_buf;
         mctp_printf("dest_ep = %x, src_ep = %x, flags = %x\n", hdr->dest_ep, hdr->src_ep, hdr->flags_seq_to_tag);
         if (hdr->dest_ep == mctp_inst->endpoint) {
-            /* TODO: handle this packet by self */
+            /* TODO: handle this packet by self 
+             * 1. if it is just a part of message, collect it until the EOM set.
+             * 2. Otherwise, invoke rx callback function to pass message to application layer.
+             */
 
+            if (mctp_inst->rx_cb)
+                mctp_inst->rx_cb(mctp_inst, hdr->src_ep, read_buf + sizeof(hdr), read_len - sizeof(hdr), medium_ext_param);
             continue;
-        } else {
-            /* try to bridge this packet */
-            if (!mctp_inst->ep_resolve)
-                continue;
-            
-            mctp *target_mctp = NULL;
-            void *target_medium_ext_params = NULL;
-            uint8_t rc = mctp_inst->ep_resolve(hdr->dest_ep, (void **)&target_mctp, &target_medium_ext_params);
-            if (rc != MCTP_SUCCESS)
-                continue;
-
-            mctp_printf("rc = %d, mctp = %p, target_medium_ext_params = %p\n", rc, target_mctp, target_medium_ext_params);
-            mctp_bridge_msg(target_mctp, read_buf, read_len, target_medium_ext_params);
-            k_free(target_medium_ext_params);
         }
+
+        /* try to bridge this packet */
+        bridge_msg(mctp_inst, read_buf, read_len);
     }
 }
 
@@ -159,10 +192,10 @@ static void mctp_tx_task(void *arg)
         if (rc != osOK)
             continue;
 
-        if (!mctp_msg.buf || !mctp_msg.medium_ext_param)
+        if (!mctp_msg.buf || !mctp_msg.len)
             continue;
 
-        if (MCTP_DEBUG) {
+        if (0) {
             mctp_printf("tx endpoint %x\n", mctp_msg.endpoint);
             print_data_hex(mctp_msg.buf, mctp_msg.len);
         }
@@ -173,12 +206,52 @@ static void mctp_tx_task(void *arg)
             mctp_inst->write_data(mctp_inst, mctp_msg.buf, mctp_msg.len, mctp_msg.medium_ext_param);
 
             k_free(mctp_msg.buf);
-            k_free(mctp_msg.medium_ext_param);
             continue;
         }
 
-        /* TODO: set up MCTP header and send to destination endpoint */
+        /* set up MCTP header and send to destination endpoint */
+        static uint8_t msg_tag;
+        uint16_t max_msg_size = mctp_inst->max_msg_size;
+        uint8_t i;
+        uint8_t split_pkt_num = (mctp_msg.len / max_msg_size) + ((mctp_msg.len % max_msg_size)? 1: 0);
+        mctp_printf("mctp_msg.len = %d\n", mctp_msg.len);
+        mctp_printf("split_pkt_num = %d\n", split_pkt_num);
+        for (i = 0; i < split_pkt_num; i++) {
+            uint8_t buf[max_msg_size + MCTP_TRANSPORT_HEADER_SIZE];
+            mctp_hdr *hdr = (mctp_hdr *)buf;
+            uint8_t cp_msg_size = max_msg_size;
 
+            memset(buf, 0, sizeof(buf));
+
+            /* first packet should set SOM */
+            if (!i)
+                hdr->som = 1;
+
+            /* last packet should set EOM */
+            if (i == (split_pkt_num - 1)) {
+                hdr->eom = 1;
+                uint8_t remain = mctp_msg.len % max_msg_size;
+                cp_msg_size = remain? remain: max_msg_size; /* remain data */
+            }
+
+            hdr->to = mctp_msg.tag_owner;
+            hdr->pkt_seq = i & MCTP_HDR_SEQ_MASK;
+            hdr->msg_tag = msg_tag & MCTP_HDR_TAG_MASK;
+
+            hdr->dest_ep = mctp_msg.endpoint;
+            hdr->src_ep = mctp_inst->endpoint;
+            hdr->hdr_ver = MCTP_HDR_HDR_VER;
+
+            mctp_printf("i = %d, cp_msg_size = %d\n", i, cp_msg_size);
+            mctp_printf("hdr->flags_seq_to_tag = %x\n", hdr->flags_seq_to_tag);
+            memcpy(buf + MCTP_TRANSPORT_HEADER_SIZE, mctp_msg.buf + i * max_msg_size, cp_msg_size);
+            mctp_inst->write_data(mctp_inst, buf, cp_msg_size + MCTP_TRANSPORT_HEADER_SIZE, mctp_msg.medium_ext_param);
+        }
+
+        k_free(mctp_msg.buf);
+
+        if (++msg_tag >= MCTP_HDR_TAG_MAX)
+            msg_tag = 0;
     }
 }
 
@@ -217,9 +290,9 @@ uint8_t mctp_deinit(mctp *mctp_inst)
 }
 
 /* configure mctp handle with specific medium type */
-uint8_t mctp_set_medium_configure(mctp *mctp_inst, MCTP_MEDIUM_TYPE medium_type, void *medium_conf)
+uint8_t mctp_set_medium_configure(mctp *mctp_inst, MCTP_MEDIUM_TYPE medium_type, mctp_medium_conf medium_conf)
 {
-    if (!mctp_inst || !medium_conf)
+    if (!mctp_inst)
         return MCTP_ERROR;
 
     if (medium_type <= MCTP_MEDIUM_TYPE_UNKNOWN || medium_type >= MCTP_MEDIUM_TYPE_MAX)
@@ -236,29 +309,13 @@ error:
     return MCTP_ERROR;
 }
 
-uint8_t mctp_get_medium_configure(mctp *mctp_inst, MCTP_MEDIUM_TYPE *medium_type, void **medium_conf)
+uint8_t mctp_get_medium_configure(mctp *mctp_inst, MCTP_MEDIUM_TYPE *medium_type, mctp_medium_conf *medium_conf)
 {
     if (!mctp_inst || !medium_type || !medium_conf)
         return MCTP_ERROR;
 
     *medium_type = mctp_inst->medium_type;
-
-    uint16_t conf_size = 0;
-    switch (mctp_inst->medium_type) {
-    case MCTP_MEDIUM_TYPE_SMBUS:
-        conf_size = sizeof(mctp_smbus_conf);
-        break;
-    default:
-        break;
-    }
-
-    *medium_conf = k_malloc(conf_size);
-    if (!(*medium_conf))
-        return MCTP_ERROR;
-
-    mctp_printf("[%s] medium conf_size = %d\n", __func__, conf_size);
-    mctp_printf("[%s] medium_conf = %p, *medium_conf = %p\n", __func__, medium_conf, *medium_conf);
-    memcpy(*medium_conf, mctp_inst->medium_conf, conf_size);
+    *medium_conf = mctp_inst->medium_conf;
     return MCTP_SUCCESS;
 }
 
@@ -335,9 +392,9 @@ error:
     return MCTP_ERROR;
 }
 
-uint8_t mctp_bridge_msg(mctp *mctp_inst, uint8_t *buf, uint16_t len, void *medium_ext_params)
+uint8_t mctp_bridge_msg(mctp *mctp_inst, uint8_t *buf, uint16_t len, mctp_medium_ext_param medium_ext_param)
 {
-    if (!mctp_inst || !buf || !len || !medium_ext_params)
+    if (!mctp_inst || !buf || !len)
         return MCTP_ERROR;
     
     if (!mctp_inst->is_servcie_start || !mctp_inst->mctp_tx_queue) {
@@ -353,11 +410,8 @@ uint8_t mctp_bridge_msg(mctp *mctp_inst, uint8_t *buf, uint16_t len, void *mediu
         goto error;
     memcpy(mctp_msg.buf, buf, len);
 
-    uint8_t medium_ext_params_size = (mctp_inst->medium_type == MCTP_MEDIUM_TYPE_SMBUS)? sizeof(mctp_smbus_ext_param): 0;
-    mctp_msg.medium_ext_param = k_malloc(medium_ext_params_size);
-    if (!mctp_msg.medium_ext_param)
-        goto error;
-    memcpy(mctp_msg.medium_ext_param, medium_ext_params, medium_ext_params_size);
+    mctp_printf("sizeof(medium_ext_param) = %d\n", sizeof(medium_ext_param));
+    mctp_msg.medium_ext_param = medium_ext_param;
 
     osStatus_t rc = osMessageQueuePut(mctp_inst->mctp_tx_queue, &mctp_msg, 0, 0);
     return (rc == osOK)? MCTP_SUCCESS: MCTP_ERROR;
@@ -366,16 +420,12 @@ error:
     if (mctp_msg.buf)
         k_free(mctp_msg.buf);
 
-    if (mctp_msg.medium_ext_param)
-        k_free(mctp_msg.medium_ext_param);
-
     return MCTP_ERROR;
 }
 
-
-uint8_t mctp_send_msg(mctp *mctp_inst, uint8_t dest_ep, uint8_t *buf, uint16_t len, uint8_t tag_owner, void *medium_ext_params)
+uint8_t mctp_send_msg(mctp *mctp_inst, uint8_t dest_ep, uint8_t *buf, uint16_t len, uint8_t tag_owner, mctp_medium_ext_param medium_ext_param)
 {
-    if (!mctp_inst || !buf || !len || !medium_ext_params)
+    if (!mctp_inst || !buf || !len)
         return MCTP_ERROR;
     
     if (!mctp_inst->is_servcie_start || !mctp_inst->mctp_tx_queue) {
@@ -392,11 +442,8 @@ uint8_t mctp_send_msg(mctp *mctp_inst, uint8_t dest_ep, uint8_t *buf, uint16_t l
         goto error;
     memcpy(mctp_msg.buf, buf, len);
 
-    uint8_t medium_ext_params_size = (mctp_inst->medium_type == MCTP_MEDIUM_TYPE_SMBUS)? sizeof(mctp_smbus_ext_param): 0;
-    mctp_msg.medium_ext_param = k_malloc(medium_ext_params_size);
-    if (!mctp_msg.medium_ext_param)
-        goto error;
-    memcpy(mctp_msg.medium_ext_param, medium_ext_params, medium_ext_params_size);
+    mctp_printf("sizeof(medium_ext_param) = %d\n", sizeof(medium_ext_param));
+    mctp_msg.medium_ext_param = medium_ext_param;
 
     osStatus_t rc = osMessageQueuePut(mctp_inst->mctp_tx_queue, &mctp_msg, 0, 0);
     return (rc == osOK)? MCTP_SUCCESS: MCTP_ERROR;
@@ -404,9 +451,6 @@ uint8_t mctp_send_msg(mctp *mctp_inst, uint8_t dest_ep, uint8_t *buf, uint16_t l
 error:
     if (mctp_msg.buf)
         k_free(mctp_msg.buf);
-
-    if (mctp_msg.medium_ext_param)
-        k_free(mctp_msg.medium_ext_param);
 
     return MCTP_ERROR;
 }
@@ -417,5 +461,14 @@ uint8_t mctp_reg_endpoint_resolve_func(mctp *mctp_inst, endpoint_resolve resolve
         return MCTP_ERROR;
 
     mctp_inst->ep_resolve = resolve_fn;
+    return MCTP_SUCCESS;
+}
+
+uint8_t mctp_reg_msg_rx_func(mctp *mctp_inst, mctp_fn_cb rx_cb)
+{
+    if (!mctp_inst || !rx_cb)
+        return MCTP_ERROR;
+
+    mctp_inst->rx_cb = rx_cb;
     return MCTP_SUCCESS;
 }

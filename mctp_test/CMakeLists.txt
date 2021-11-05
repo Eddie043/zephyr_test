@@ -11,4 +11,5 @@ PRIVATE
     src/main.c
     src/mctp.c
     src/mctp_smbus.c
+    src/pldm.c
 )

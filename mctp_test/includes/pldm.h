@@ -26,7 +26,7 @@ extern "C" {
 #define PLDM_BASE_CODES_ERROR_UNSUPPORT_PLDM_CMD 0x05
 #define PLDM_BASE_CODES_ERROR_UNSUPPORT_PLDM_TYPE 0x20
 
-#define PLDM_MAX_RESP_DATA_SIZE 2048
+#define PLDM_MAX_DATA_SIZE 256
 
 #define pldm_printf(format, s...) \
 	do { \
@@ -35,6 +35,14 @@ extern "C" {
 	} while (0)
 
 typedef uint8_t (*pldm_cmd_proc_fn)(uint8_t *, uint16_t, uint8_t *, uint16_t *);
+
+typedef enum {
+    PLDM_TYPE_BASE = 0x00,
+    PLDM_TYPE_SMBIOS,
+    PLDM_TYPE_PLAT_MON_CTRL,
+    PLDM_TYPE_BIOS_CTRL_CONF,
+    PLDM_TYPE_FW_UPDATE = 0x05
+} PLDM_TYPE;
 
 typedef struct _pldm_cmd_handler {
     uint8_t cmd_code;
@@ -67,12 +75,16 @@ typedef struct __attribute__((packed)) {
 
 typedef struct _pldm_msg {
     pldm_hdr hdr; /* TODO: endian check */
-    uint8_t buf[PLDM_MAX_RESP_DATA_SIZE];
+    uint8_t buf[PLDM_MAX_DATA_SIZE];
     uint16_t len;
 } pldm_msg;
 
+/* the pldm command handler */
 uint8_t mctp_pldm_cmd_handler(void *mctp_p, uint8_t *buf, uint32_t len, mctp_ext_param ext_params);
 
+/* send the pldm command message through mctp */
+uint8_t mctp_pldm_send_msg(void *mctp_p, pldm_msg *msg, mctp_ext_param ext_param, 
+                        void (*resp_cb)(void *, uint8_t *, uint16_t), void *cb_args);
 #ifdef __cplusplus
 }
 #endif

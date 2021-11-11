@@ -10,7 +10,7 @@
 #include "mctp.h"
 #include "pldm.h"
 
-#define MCTP_SMBUS_NUM 2
+#define MCTP_SMBUS_NUM 1
 
 #define MCTP_MSG_TYPE_SHIFT 0
 #define MCTP_MSG_TYPE_MASK 0x7F
@@ -40,7 +40,7 @@ static mctp_msg_handler cmd_tbl[] = {
 
 static mctp_smbus_port smbus_port[MCTP_SMBUS_NUM] = {
 	{.conf.smbus_conf.addr = 0x20, .conf.smbus_conf.bus = 0x01},
-	{.conf.smbus_conf.addr = 0x20, .conf.smbus_conf.bus = 0x02}
+	// {.conf.smbus_conf.addr = 0x20, .conf.smbus_conf.bus = 0x02}
 };
 
 mctp_route_entry mctp_route_tbl[] = {
@@ -49,8 +49,7 @@ mctp_route_entry mctp_route_tbl[] = {
 	{0x13, 0x01, 0x43},
 	{0x14, 0x02, 0x44},
 	{0x15, 0x01, 0x45},
-	{0x16, 0x02, 0x46},
-	{0xFF, 0xFF, 0xFF}
+	{0x16, 0x02, 0x46}
 };
 
 static mctp *find_mctp_by_smbus(uint8_t bus)
@@ -75,9 +74,8 @@ uint8_t mctp_control_cmd_handler(void *mctp_p, uint8_t src_ep, uint8_t *buf, uin
 	return MCTP_SUCCESS;
 }
 
-uint8_t mctp_msg_recv(void *mctp_p, uint8_t *buf, uint32_t len, mctp_ext_param ext_params)
+static uint8_t mctp_msg_recv(void *mctp_p, uint8_t *buf, uint32_t len, mctp_ext_param ext_params)
 {
-	mctp_printf("\n");
 	if (!mctp_p || !buf || !len)
 		return MCTP_ERROR;
 	
@@ -86,11 +84,9 @@ uint8_t mctp_msg_recv(void *mctp_p, uint8_t *buf, uint32_t len, mctp_ext_param e
 	uint8_t ic = (buf[0] & MCTP_IC_MASK) >> MCTP_IC_SHIFT;
 	(void)ic;
 	
-	mctp_printf("\n");
 	uint8_t i;
 	for (i = 0; i < sizeof(cmd_tbl) / sizeof(*cmd_tbl); i++) {
 		if (cmd_tbl[i].type == msg_type) {
-			mctp_printf("\n");
 			cmd_tbl[i].msg_handler_cb(mctp_p, buf, len, ext_params);
 			break;
 		}
@@ -98,7 +94,6 @@ uint8_t mctp_msg_recv(void *mctp_p, uint8_t *buf, uint32_t len, mctp_ext_param e
 
 	return MCTP_SUCCESS;
 }
-
 
 static uint8_t get_route_info(uint8_t dest_endpoint, void **mctp_inst, mctp_ext_param *ext_params)
 {
@@ -108,7 +103,7 @@ static uint8_t get_route_info(uint8_t dest_endpoint, void **mctp_inst, mctp_ext_
 	uint8_t rc = MCTP_ERROR;
 	uint32_t i;
 
-	for (i = 0; ; i++) {
+	for (i = 0; ARRAY_SIZE(mctp_route_tbl); i++) {
 		mctp_route_entry *p = mctp_route_tbl + i;
 		if (p->endpoint == dest_endpoint) {
 			*mctp_inst = find_mctp_by_smbus(p->bus);
@@ -116,12 +111,15 @@ static uint8_t get_route_info(uint8_t dest_endpoint, void **mctp_inst, mctp_ext_
 			ext_params->smbus_ext_param.addr = p->addr;
 			rc = MCTP_SUCCESS;
 			break;
-		} else if (p->endpoint == 0xFF) {
-			break;
 		}
 	}
 
 	return rc;
+}
+
+static void main_gettid(void *args, uint8_t *buf, uint16_t len)
+{
+	pldm_printf("\n");
 }
 
 void main(void)
@@ -143,23 +141,38 @@ void main(void)
 		uint8_t rc = mctp_set_medium_configure(p->mctp_inst, MCTP_MEDIUM_TYPE_SMBUS, p->conf);
 		mctp_printf("mctp_set_medium_configure %s\n", (rc == MCTP_SUCCESS)? "success": "failed");
 
-		if (MCTP_DEBUG) {
-			MCTP_MEDIUM_TYPE medium_type = MCTP_MEDIUM_TYPE_UNKNOWN;
-			mctp_medium_conf medium_conf;
-			rc = mctp_get_medium_configure(p->mctp_inst, &medium_type, &medium_conf);
-			mctp_printf("mctp_get_medium_configure %s\n", (rc == MCTP_SUCCESS)? "success": "failed");
-			mctp_printf("medium_type = %d\n", medium_type);
-			mctp_printf("smbus bus = %x, addr = %x\n", medium_conf.smbus_conf.bus, medium_conf.smbus_conf.addr);
-		}
+		/* test get medium function */
+		MCTP_MEDIUM_TYPE medium_type = MCTP_MEDIUM_TYPE_UNKNOWN;
+		mctp_medium_conf medium_conf;
+		rc = mctp_get_medium_configure(p->mctp_inst, &medium_type, &medium_conf);
+		mctp_printf("mctp_get_medium_configure %s\n", (rc == MCTP_SUCCESS)? "success": "failed");
+		mctp_printf("medium_type = %d\n", medium_type);
+		mctp_printf("smbus bus = %x, addr = %x\n", medium_conf.smbus_conf.bus, medium_conf.smbus_conf.addr);
 
 		mctp_reg_endpoint_resolve_func(p->mctp_inst, get_route_info);
 		mctp_reg_msg_rx_func(p->mctp_inst, mctp_msg_recv);
 		mctp_start(p->mctp_inst);
 	}
 
+	pldm_init();
+
 	while (1) {
 		i++;
 		k_msleep(1000000);
+
+		mctp_ext_param ext_param = {0};
+		ext_param.type = MCTP_MEDIUM_TYPE_SMBUS;
+		ext_param.smbus_ext_param.addr = 0x80;
+		ext_param.ep = 0x78;
+
+		pldm_msg msg = {0};
+		msg.hdr.pldm_type = PLDM_TYPE_BASE;
+		msg.hdr.cmd = PLDM_BASE_CMD_CODE_GETTID;
+		msg.hdr.rq = 1;
+#if 1
+		if (!(i % 1000))
+			mctp_pldm_send_msg(smbus_port[0].mctp_inst, &msg, ext_param, main_gettid, NULL);
+#endif
 #if 0
 		if (!(i % 1000)) {
 			uint8_t buf[] = {0x01,0x00,0x05,0x15,0x00,0x22,0x00,0x00,0xEA,

@@ -1,6 +1,8 @@
 #include <zephyr.h>
 #include <string.h>
 #include <sys/printk.h>
+#include <sys/util.h>
+#include <sys/slist.h>
 #include <cmsis_os2.h>
 #include "pldm.h"
 
@@ -17,7 +19,7 @@ struct _get_tid_resp {
     uint8_t tid;
 } __attribute__((packed));
 
-uint8_t set_tid_resp(uint8_t *buf, uint16_t len, uint8_t *resp, uint16_t *resp_len)
+uint8_t set_tid(uint8_t *buf, uint16_t len, uint8_t *resp, uint16_t *resp_len)
 {
     if (!buf || !resp || !resp_len)
         return PLDM_ERROR;
@@ -30,7 +32,7 @@ uint8_t set_tid_resp(uint8_t *buf, uint16_t len, uint8_t *resp, uint16_t *resp_l
     return PLDM_SUCCESS;
 }
 
-uint8_t get_tid_resp(uint8_t *buf, uint16_t len, uint8_t *resp, uint16_t *resp_len)
+uint8_t get_tid(uint8_t *buf, uint16_t len, uint8_t *resp, uint16_t *resp_len)
 {
     pldm_printf("\n");
     if (!buf || !resp || !resp_len)
@@ -46,8 +48,8 @@ uint8_t get_tid_resp(uint8_t *buf, uint16_t len, uint8_t *resp, uint16_t *resp_l
 
 /* the last entry shoule be {PLDM_CMD_TBL_TERMINATE_CMD_CODE, NULL} in the cmd table */
 static pldm_cmd_handler pldm_base_cmd_tbl[] = {
-    {PLDM_BASE_CMD_CODE_SETTID, set_tid_resp},
-    {PLDM_BASE_CMD_CODE_GETTID, get_tid_resp}
+    {PLDM_BASE_CMD_CODE_SETTID, set_tid},
+    {PLDM_BASE_CMD_CODE_GETTID, get_tid}
 };
 
 uint8_t pldm_base_handler_found(uint8_t code, void **ret_fn)
@@ -55,7 +57,7 @@ uint8_t pldm_base_handler_found(uint8_t code, void **ret_fn)
     pldm_cmd_proc_fn fn = NULL;
     uint8_t i;
 
-    for (i = 0; i < sizeof(pldm_base_cmd_tbl) / sizeof(*pldm_base_cmd_tbl); i++) {
+    for (i = 0; i < ARRAY_SIZE(pldm_base_cmd_tbl); i++) {
         if (pldm_base_cmd_tbl[i].cmd_code == code) {
             fn = pldm_base_cmd_tbl[i].fn;
             break;

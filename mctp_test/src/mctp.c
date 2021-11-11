@@ -14,7 +14,6 @@
 #define MCTP_HDR_HDR_VER 0x01
 #define MCTP_HDR_SEQ_MASK 0x03
 #define MCTP_HDR_TAG_MASK 0x07
-#define MCTP_HDR_TAG_MAX 0x07
 
 typedef struct __attribute__((packed)) {
     uint8_t hdr_ver;
@@ -126,8 +125,6 @@ static void mctp_rx_task(void *arg)
 
     mctp_printf("mctp_rx_task start %p!\n", mctp_inst);
     while (1) {
-        /* TODO: read data from medium interface */
-
         uint8_t i = 0;
         while (1) {
             k_msleep(100000000);
@@ -240,6 +237,8 @@ static void mctp_tx_task(void *arg)
 
             hdr->to = mctp_msg.ext_param.tag_owner;
             hdr->pkt_seq = i & MCTP_HDR_SEQ_MASK;
+
+            /* TODO: should avoid the msg_tag if there are pending mctp response packets? */
             hdr->msg_tag = msg_tag & MCTP_HDR_TAG_MASK;
 
             hdr->dest_ep = mctp_msg.ext_param.ep;
@@ -255,10 +254,8 @@ static void mctp_tx_task(void *arg)
         k_free(mctp_msg.buf);
         
         /* only request mctp message needs to increase msg_tag */
-        if (mctp_msg.ext_param.tag_owner) {
-            if (++msg_tag >= MCTP_HDR_TAG_MAX)
-                msg_tag = 0;
-        }
+        if (mctp_msg.ext_param.tag_owner)
+            msg_tag++;
     }
 }
 

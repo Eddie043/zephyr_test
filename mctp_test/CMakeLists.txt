@@ -11,12 +11,12 @@ target_include_directories(app PRIVATE
     pldm
 )
 
-file(GLOB SRC_FOLDER
+file(GLOB ALL_SRC
     src/*.c
     mctp/*.c
     pldm/*.c)
 
 target_sources(app
 PRIVATE
-    ${SRC_FOLDER}
+    ${ALL_SRC}
 )

@@ -39,7 +39,7 @@ static mctp_msg_handler cmd_tbl[] = {
 };
 
 static mctp_smbus_port smbus_port[MCTP_SMBUS_NUM] = {
-	{.conf.smbus_conf.addr = 0x20, .conf.smbus_conf.bus = 0x01},
+	{.conf.smbus_conf.addr = 0xB2, .conf.smbus_conf.bus = 0x01},
 	// {.conf.smbus_conf.addr = 0x20, .conf.smbus_conf.bus = 0x02}
 };
 
@@ -157,8 +157,7 @@ void main(void)
 	pldm_init();
 
 	while (1) {
-		i++;
-		k_msleep(1000000);
+		k_msleep(1000);
 
 		mctp_ext_param ext_param = {0};
 		ext_param.type = MCTP_MEDIUM_TYPE_SMBUS;
@@ -170,8 +169,7 @@ void main(void)
 		msg.hdr.cmd = PLDM_BASE_CMD_CODE_GETTID;
 		msg.hdr.rq = 1;
 #if 1
-		if (!(i % 1000))
-			mctp_pldm_send_msg(smbus_port[0].mctp_inst, &msg, ext_param, main_gettid, NULL);
+		mctp_pldm_send_msg(smbus_port[0].mctp_inst, &msg, ext_param, main_gettid, NULL);
 #endif
 #if 0
 		if (!(i % 1000)) {

@@ -24,6 +24,8 @@ extern "C" {
 #define MCTP_PEC_SIZE 1 /* SMBUS/I3C */
 #define MCTP_META_INFO_SIZE (MCTP_TRANSPORT_HEADER_SIZE + MCTP_PEC_SIZE)
 
+#define MCTP_MAX_MSG_TAG_NUM 8
+
 #define mctp_printf(format, s...) \
 	do { \
         if (MCTP_DEBUG) \
@@ -49,13 +51,13 @@ typedef enum {
 
 /* smbus extra medium data of endpoint */
 typedef struct _mctp_i3c_ext_param {
-    uint8_t addr;
+    uint8_t addr; /* 8 bit address */
     uint32_t dummy; // TODO: test only
 } mctp_i3c_ext_param;
 
 /* smbus extra medium data of endpoint */
 typedef struct _mctp_smbus_ext_param {
-    uint8_t addr;
+    uint8_t addr; /* 8 bit address */
 } mctp_smbus_ext_param;
 
 /* mctp extra parameters prototype */
@@ -134,6 +136,12 @@ typedef struct _mctp {
 
     /* write queue */
     osMessageQueueId_t mctp_tx_queue;
+
+    /* point to the rx message buffer that is assembling */
+    struct {
+        uint8_t *buf;
+        uint16_t ofs;
+    } temp_msg_buf[MCTP_MAX_MSG_TAG_NUM];
     
     /* the callback when recevie mctp data */
     mctp_fn_cb rx_cb;

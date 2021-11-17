@@ -31,7 +31,7 @@ extern "C" {
 #define pldm_printf(format, s...) \
 	do { \
         if (PLDM_DEBUG) \
-		    printk("[%lld][%s::%s::%d]" format, k_uptime_get(), __FILE__, __func__, __LINE__, ## s); \
+		    printk("[%llu][%s::%s::%d]" format, k_uptime_get(), __FILE__, __func__, __LINE__, ## s); \
 	} while (0)
 
 typedef uint8_t (*pldm_cmd_proc_fn)(uint8_t *, uint16_t, uint8_t *, uint16_t *);
@@ -84,7 +84,10 @@ uint8_t mctp_pldm_cmd_handler(void *mctp_p, uint8_t *buf, uint32_t len, mctp_ext
 
 /* send the pldm command message through mctp */
 uint8_t mctp_pldm_send_msg(void *mctp_p, pldm_msg *msg, mctp_ext_param ext_param, 
-                        void (*resp_cb)(void *, uint8_t *, uint16_t), void *cb_args);
+                        void (*resp_fn)(void *, uint8_t *, uint16_t), void *cb_args);
+
+uint8_t pldm_init(void);
+
 #ifdef __cplusplus
 }
 #endif

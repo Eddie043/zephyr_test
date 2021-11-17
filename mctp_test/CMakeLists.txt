@@ -10,11 +10,13 @@ target_include_directories(app PRIVATE
     includes
     pldm
 )
+
+file(GLOB SRC_FOLDER
+    src/*.c
+    mctp/*.c
+    pldm/*.c)
+
 target_sources(app
-PRIVATE 
-    src/main.c
-    src/mctp.c
-    src/mctp_smbus.c
-    pldm/pldm.c
-    pldm/pldm_base.c
+PRIVATE
+    ${SRC_FOLDER}
 )

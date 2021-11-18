@@ -52,7 +52,7 @@ static pldm_cmd_handler pldm_base_cmd_tbl[] = {
     {PLDM_BASE_CMD_CODE_GETTID, get_tid}
 };
 
-uint8_t pldm_base_handler_found(uint8_t code, void **ret_fn)
+uint8_t pldm_base_handler_query(uint8_t code, void **ret_fn)
 {
     pldm_cmd_proc_fn fn = NULL;
     uint8_t i;

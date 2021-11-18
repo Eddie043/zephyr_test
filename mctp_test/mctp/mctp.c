@@ -300,7 +300,8 @@ static void mctp_tx_task(void *arg)
             hdr->pkt_seq = i & MCTP_HDR_SEQ_MASK;
 
             /* TODO: should avoid the msg_tag if there are pending mctp response packets? */
-            hdr->msg_tag = msg_tag & MCTP_HDR_TAG_MASK;
+            /* if the message is response, keep the original msg_tag of ext_param */
+            hdr->msg_tag = (hdr->to) ? (msg_tag & MCTP_HDR_TAG_MASK) : mctp_msg.ext_param.msg_tag;
 
             hdr->dest_ep = mctp_msg.ext_param.ep;
             hdr->src_ep = mctp_inst->endpoint;
@@ -504,8 +505,6 @@ uint8_t mctp_send_msg(mctp *mctp_inst, uint8_t *buf, uint16_t len, mctp_ext_para
     if (!mctp_msg.buf)
         goto error;
     memcpy(mctp_msg.buf, buf, len);
-
-    mctp_printf("sizeof(ext_param) = %d\n", sizeof(ext_param));
     mctp_msg.ext_param = ext_param;
 
     osStatus_t rc = osMessageQueuePut(mctp_inst->mctp_tx_queue, &mctp_msg, 0, 0);

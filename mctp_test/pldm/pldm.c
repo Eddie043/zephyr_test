@@ -31,7 +31,16 @@ typedef struct _pldm {
 
 } pldm_t;
 
+struct _pldm_handler_query_entry {
+    PLDM_TYPE type;
+    uint8_t (*handler_query)(uint8_t, void **);
+};
+
 static pldm_t pldm;
+
+static struct _pldm_handler_query_entry query_tbl[] = {
+    {PLDM_TYPE_BASE, pldm_base_handler_query}
+};
 
 static void list_monitor(void *pldm_p, void *dummy0, void *dummy1)
 {
@@ -149,25 +158,24 @@ uint8_t mctp_pldm_cmd_handler(void *mctp_p, uint8_t *buf, uint32_t len, mctp_ext
     uint8_t *comp = resp.buf;
 
     pldm_cmd_proc_fn handler = NULL;
-    uint8_t (*handler_found)(uint8_t, void **);
+    uint8_t (*handler_query)(uint8_t, void **);
 
-    switch (hdr->pldm_type) {
-    case PLDM_TYPE_BASE:
-        handler_found = pldm_base_handler_found;
-        break;
-    default:
-        handler_found = NULL;
+    uint8_t i;
+    for (i = 0; i < ARRAY_SIZE(query_tbl); i++) {
+        if (hdr->pldm_type == query_tbl[i].type) {
+            handler_query = query_tbl[i].handler_query;
         break;
     }
+    }
 
-    if (!handler_found) {
+    if (!handler_query) {
         *comp = PLDM_BASE_CODES_ERROR_UNSUPPORT_PLDM_TYPE;
         goto send_msg;
     }
     
     uint8_t rc = PLDM_ERROR;
     /* found the proper cmd handler in the pldm_type_cmd table */
-    rc = handler_found(hdr->cmd, (void **)&handler);
+    rc = handler_query(hdr->cmd, (void **)&handler);
     if (rc == PLDM_ERROR || !handler) {
         *comp = PLDM_BASE_CODES_ERROR_UNSUPPORT_PLDM_CMD;
         goto send_msg;
@@ -215,7 +223,7 @@ uint8_t mctp_pldm_send_msg(void *mctp_p, pldm_msg *msg, mctp_ext_param ext_param
     }
 
     if (msg->hdr.rq) {
-        /* if the msg is request, should store the msg/resp_fn/cb_args, which are used to handle the response data */
+        /* if the msg is sending request, should store the msg/resp_fn/cb_args, which are used to handle the response data */
         req_pldm_msg *req_msg = (req_pldm_msg *)k_malloc(sizeof(*req_msg));
         if (!req_msg) {
             pldm_printf("malloc FAILED!!\n");
@@ -228,7 +236,6 @@ uint8_t mctp_pldm_send_msg(void *mctp_p, pldm_msg *msg, mctp_ext_param ext_param
         
         /* the uptime is int64_t millisecond, don't care overflow */
         req_msg->exp_timeout_time = k_uptime_get() + PLDM_MSG_TIMEOUT_MS;
-        pldm_printf("req_msg %p, exp_timeout_time = %lld\n", req_msg, req_msg->exp_timeout_time);
 
         /* TODO: should set timeout? */
         k_mutex_lock(&pldm.list_mutex, K_FOREVER);

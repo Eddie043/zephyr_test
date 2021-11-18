@@ -100,7 +100,7 @@ static uint16_t mctp_smbus_read(void *mctp_p, uint8_t *buf, uint32_t len, mctp_e
         return 0;
     
     extra_data->type = MCTP_MEDIUM_TYPE_SMBUS;
-    extra_data->smbus_ext_param.addr = hdr->src_addr;
+    extra_data->smbus_ext_param.addr = hdr->src_addr - 1;
 
     uint8_t rt_size = rlen - sizeof(smbus_hdr) - is_pec_exist;
     memcpy(buf, rdata + sizeof(smbus_hdr), rt_size);

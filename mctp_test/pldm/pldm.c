@@ -39,7 +39,8 @@ struct _pldm_handler_query_entry {
 static pldm_t pldm;
 
 static struct _pldm_handler_query_entry query_tbl[] = {
-    {PLDM_TYPE_BASE, pldm_base_handler_query}
+    {PLDM_TYPE_BASE, pldm_base_handler_query},
+    {PLDM_TYPE_OEM, pldm_oem_handler_query}
 };
 
 static void list_monitor(void *pldm_p, void *dummy0, void *dummy1)
@@ -120,7 +121,7 @@ static uint8_t pldm_resp_msg_proc(void *mctp_p, uint8_t *buf, uint32_t len, mctp
         /* invoke resp handler */
         req_pldm_msg *p = (req_pldm_msg *)found_node;
         if (p->resp_fn)
-            p->resp_fn(p->cb_args, buf, len);
+            p->resp_fn(p->cb_args, buf + sizeof(p->hdr), len - sizeof(p->hdr)); /* remove pldm header for handler */
         k_free(p);
     }
 
@@ -158,7 +159,7 @@ uint8_t mctp_pldm_cmd_handler(void *mctp_p, uint8_t *buf, uint32_t len, mctp_ext
     uint8_t *comp = resp.buf;
 
     pldm_cmd_proc_fn handler = NULL;
-    uint8_t (*handler_query)(uint8_t, void **);
+    uint8_t (*handler_query)(uint8_t, void **) = NULL;
 
     uint8_t i;
     for (i = 0; i < ARRAY_SIZE(query_tbl); i++) {

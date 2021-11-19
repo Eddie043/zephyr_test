@@ -11,6 +11,7 @@ extern "C" {
 #include <cmsis_os2.h>
 #include "mctp.h"
 #include "pldm_base.h"
+#include "pldm_oem.h"
 
 #define PLDM_DEBUG 1
 
@@ -41,7 +42,8 @@ typedef enum {
     PLDM_TYPE_SMBIOS,
     PLDM_TYPE_PLAT_MON_CTRL,
     PLDM_TYPE_BIOS_CTRL_CONF,
-    PLDM_TYPE_FW_UPDATE = 0x05
+    PLDM_TYPE_FW_UPDATE = 0x05,
+    PLDM_TYPE_OEM = 0x3F
 } PLDM_TYPE;
 
 typedef struct _pldm_cmd_handler {

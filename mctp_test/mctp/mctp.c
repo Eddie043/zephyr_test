@@ -480,7 +480,8 @@ uint8_t mctp_bridge_msg(mctp *mctp_inst, uint8_t *buf, uint16_t len, mctp_ext_pa
     mctp_msg.ext_param = ext_param;
 
     osStatus_t rc = osMessageQueuePut(mctp_inst->mctp_tx_queue, &mctp_msg, 0, 0);
-    return (rc == osOK)? MCTP_SUCCESS: MCTP_ERROR;
+    if (rc == osOK)
+        return MCTP_SUCCESS;
 
 error:
     if (mctp_msg.buf)
@@ -508,7 +509,8 @@ uint8_t mctp_send_msg(mctp *mctp_inst, uint8_t *buf, uint16_t len, mctp_ext_para
     mctp_msg.ext_param = ext_param;
 
     osStatus_t rc = osMessageQueuePut(mctp_inst->mctp_tx_queue, &mctp_msg, 0, 0);
-    return (rc == osOK)? MCTP_SUCCESS: MCTP_ERROR;
+    if (rc == osOK)
+        return MCTP_SUCCESS;
 
 error:
     if (mctp_msg.buf)

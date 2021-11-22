@@ -122,6 +122,12 @@ static void main_gettid(void *args, uint8_t *buf, uint16_t len)
 	pldm_printf("\n");
 }
 
+static void to_test(void *to_args)
+{
+	uint8_t *i = (uint8_t *)to_args;
+	pldm_printf("*i = %d\n", *i);
+}
+
 void main(void)
 {
 	mctp_printf("MCTP test\n");
@@ -169,7 +175,10 @@ void main(void)
 		msg.hdr.cmd = PLDM_BASE_CMD_CODE_GETTID;
 		msg.hdr.rq = 1;
 #if 1
-		mctp_pldm_send_msg(smbus_port[0].mctp_inst, &msg, ext_param, main_gettid, NULL);
+		// mctp_pldm_send_msg(smbus_port[0].mctp_inst, &msg, ext_param, main_gettid, NULL);
+		static uint8_t i = 78;
+		mctp_pldm_send_msg_with_timeout(smbus_port[0].mctp_inst, &msg, ext_param, main_gettid, NULL, 5000, to_test, &i);
+		i++;
 #endif
 #if 0
 		if (!(i % 1000)) {

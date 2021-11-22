@@ -84,6 +84,11 @@ typedef struct _pldm_msg {
 /* the pldm command handler */
 uint8_t mctp_pldm_cmd_handler(void *mctp_p, uint8_t *buf, uint32_t len, mctp_ext_param ext_params);
 
+/* send the pldm command message through mctp with timeout setting and timeout callback function */
+uint8_t mctp_pldm_send_msg_with_timeout(void *mctp_p, pldm_msg *msg, mctp_ext_param ext_param, 
+                        void (*resp_fn)(void *, uint8_t *, uint16_t), void *cb_args,
+                        uint16_t timeout_ms, void (*to_fn)(void *), void *to_fn_args);
+
 /* send the pldm command message through mctp */
 uint8_t mctp_pldm_send_msg(void *mctp_p, pldm_msg *msg, mctp_ext_param ext_param, 
                         void (*resp_fn)(void *, uint8_t *, uint16_t), void *cb_args);

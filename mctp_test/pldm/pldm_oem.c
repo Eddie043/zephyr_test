@@ -6,16 +6,7 @@
 #include <cmsis_os2.h>
 #include "pldm.h"
 
-struct _cmd_echo_req {
-    uint8_t first_data;
-} __attribute__((packed));
-
-struct _cmd_echo_resp {
-    uint8_t completion_code;
-    uint8_t first_data;
-} __attribute__((packed));
-
-uint8_t cmd_echo(uint8_t *buf, uint16_t len, uint8_t *resp, uint16_t *resp_len)
+static uint8_t cmd_echo(uint8_t *buf, uint16_t len, uint8_t *resp, uint16_t *resp_len)
 {
     if (!buf || !resp || !resp_len)
         return PLDM_ERROR;

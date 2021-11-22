@@ -6,19 +6,6 @@
 #include <cmsis_os2.h>
 #include "pldm.h"
 
-struct _set_tid_req {
-    uint8_t tid;
-} __attribute__((packed));
-
-struct _set_tid_resp {
-    uint8_t completion_code;
-} __attribute__((packed));
-
-struct _get_tid_resp {
-    uint8_t completion_code;
-    uint8_t tid;
-} __attribute__((packed));
-
 uint8_t set_tid(uint8_t *buf, uint16_t len, uint8_t *resp, uint16_t *resp_len)
 {
     if (!buf || !resp || !resp_len)

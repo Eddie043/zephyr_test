@@ -106,7 +106,7 @@ typedef union {
 } mctp_medium_conf;
 
 /* mctp tx message struct */
-typedef struct _mctp_tx_msg {
+typedef struct __attribute__((aligned(4))) {
     uint8_t is_bridge_packet;
     uint8_t *buf;
     uint16_t len;
@@ -135,7 +135,7 @@ typedef struct _mctp {
     uint8_t mctp_tx_task_name[MCTP_TASK_NAME_LEN];
 
     /* write queue */
-    osMessageQueueId_t mctp_tx_queue;
+    struct k_msgq mctp_tx_queue;
 
     /* point to the rx message buffer that is assembling */
     struct {

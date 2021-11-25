@@ -233,11 +233,6 @@ static void mctp_tx_task(void *arg)
     
     mctp *mctp_inst = (mctp *)arg;
 
-    if (!mctp_inst->mctp_tx_queue) {
-        mctp_printf("mctp_tx_task without mctp_tx_queue!\n");
-        return;
-    }
-
     if (!mctp_inst->write_data) {
         mctp_printf("mctp_tx_task without medium write function!\n");
         return;
@@ -246,7 +241,7 @@ static void mctp_tx_task(void *arg)
     mctp_printf("mctp_tx_task start %p!\n", mctp_inst);
     while (1) {
         mctp_tx_msg mctp_msg = {0};
-        osStatus_t rc = osMessageQueueGet(mctp_inst->mctp_tx_queue, &mctp_msg, NULL, osWaitForever);
+        osStatus_t rc = k_msgq_get(&mctp_inst->mctp_tx_queue, &mctp_msg, K_FOREVER);
         if (rc != osOK)
             continue;
 
@@ -400,9 +395,9 @@ uint8_t mctp_stop(mctp *mctp_inst)
         mctp_inst->mctp_tx_task_tid = NULL;
     }
 
-    if (!mctp_inst->mctp_tx_queue) {
-        osMessageQueueDelete(mctp_inst->mctp_tx_queue);
-        mctp_inst->mctp_tx_queue = NULL;
+    if (mctp_inst->mctp_tx_queue.buffer_start) {
+        k_free(mctp_inst->mctp_tx_queue.buffer_start);
+        mctp_inst->mctp_tx_queue.buffer_start = NULL;
     }
 
     mctp_inst->is_servcie_start = 0;
@@ -420,9 +415,15 @@ uint8_t mctp_start(mctp *mctp_inst)
     }
 
     set_thread_name(mctp_inst);
-    mctp_inst->mctp_tx_queue = osMessageQueueNew(MCTP_TX_QUEUE_SIZE, sizeof(mctp_tx_msg), NULL);
-    if (!mctp_inst->mctp_tx_queue)
+
+    
+    uint8_t *msgq_buf = (uint8_t *)k_malloc(MCTP_TX_QUEUE_SIZE * sizeof(mctp_tx_msg));
+    if (!msgq_buf) {
+        mctp_printf("msgq alloc failed!!\n");
         goto error;
+    }
+
+    k_msgq_init(&mctp_inst->mctp_tx_queue, msgq_buf, sizeof(mctp_tx_msg), MCTP_TX_QUEUE_SIZE);
 
     osThreadAttr_t thread_attr = {0};
     /* create rx service */
@@ -463,7 +464,7 @@ uint8_t mctp_bridge_msg(mctp *mctp_inst, uint8_t *buf, uint16_t len, mctp_ext_pa
     if (!mctp_inst || !buf || !len)
         return MCTP_ERROR;
     
-    if (!mctp_inst->is_servcie_start || !mctp_inst->mctp_tx_queue) {
+    if (!mctp_inst->is_servcie_start) {
         mctp_printf("The mctp_inst isn't start service!\n");
         return MCTP_ERROR;
     }
@@ -479,8 +480,8 @@ uint8_t mctp_bridge_msg(mctp *mctp_inst, uint8_t *buf, uint16_t len, mctp_ext_pa
     mctp_printf("sizeof(ext_param) = %d\n", sizeof(ext_param));
     mctp_msg.ext_param = ext_param;
 
-    osStatus_t rc = osMessageQueuePut(mctp_inst->mctp_tx_queue, &mctp_msg, 0, 0);
-    if (rc == osOK)
+    int rc = k_msgq_put(&mctp_inst->mctp_tx_queue, &mctp_msg, K_NO_WAIT);
+    if (!rc)
         return MCTP_SUCCESS;
 
 error:
@@ -495,7 +496,7 @@ uint8_t mctp_send_msg(mctp *mctp_inst, uint8_t *buf, uint16_t len, mctp_ext_para
     if (!mctp_inst || !buf || !len)
         return MCTP_ERROR;
     
-    if (!mctp_inst->is_servcie_start || !mctp_inst->mctp_tx_queue) {
+    if (!mctp_inst->is_servcie_start) {
         mctp_printf("The mctp_inst isn't start service!\n");
         return MCTP_ERROR;
     }
@@ -508,8 +509,8 @@ uint8_t mctp_send_msg(mctp *mctp_inst, uint8_t *buf, uint16_t len, mctp_ext_para
     memcpy(mctp_msg.buf, buf, len);
     mctp_msg.ext_param = ext_param;
 
-    osStatus_t rc = osMessageQueuePut(mctp_inst->mctp_tx_queue, &mctp_msg, 0, 0);
-    if (rc == osOK)
+    int rc = k_msgq_put(&mctp_inst->mctp_tx_queue, &mctp_msg, K_NO_WAIT);
+    if (!rc)
         return MCTP_SUCCESS;
 
 error:

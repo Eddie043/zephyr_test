@@ -17,6 +17,10 @@
 
 #define MSG_ASSEMBLY_BUF_SIZE 1024
 
+#define STACKSIZE 1024
+K_THREAD_STACK_DEFINE(rx_task_stack_area, STACKSIZE);
+K_THREAD_STACK_DEFINE(tx_task_stack_area, STACKSIZE);
+
 typedef struct __attribute__((packed)) {
     uint8_t hdr_ver;
     uint8_t dest_ep;
@@ -147,7 +151,7 @@ static uint8_t mctp_pkt_assembling(mctp *mctp_inst, uint8_t *buf, uint16_t len)
 }
 
 /* mctp rx task */
-static void mctp_rx_task(void *arg)
+static void mctp_rx_task(void *arg, void *dummy0, void *dummy1)
 {
     if (!arg) {
         mctp_printf("mctp_rx_task without mctp_inst!\n");
@@ -224,7 +228,7 @@ static void mctp_rx_task(void *arg)
 }
 
 /* mctp tx task */
-static void mctp_tx_task(void *arg)
+static void mctp_tx_task(void *arg, void *dummy0, void *dummy1)
 {
     if (!arg) {
         mctp_printf("mctp_tx_task without mctp_inst!\n");
@@ -386,12 +390,12 @@ uint8_t mctp_stop(mctp *mctp_inst)
         return MCTP_ERROR;
 
     if (mctp_inst->mctp_rx_task_tid) {
-        osThreadTerminate(mctp_inst->mctp_rx_task_tid);
+        k_thread_abort(mctp_inst->mctp_rx_task_tid);
         mctp_inst->mctp_rx_task_tid = NULL;
     }
 
     if (mctp_inst->mctp_tx_task_tid) {
-        osThreadTerminate(mctp_inst->mctp_tx_task_tid);
+        k_thread_abort(mctp_inst->mctp_tx_task_tid);
         mctp_inst->mctp_tx_task_tid = NULL;
     }
 
@@ -416,7 +420,6 @@ uint8_t mctp_start(mctp *mctp_inst)
 
     set_thread_name(mctp_inst);
 
-    
     uint8_t *msgq_buf = (uint8_t *)k_malloc(MCTP_TX_QUEUE_SIZE * sizeof(mctp_tx_msg));
     if (!msgq_buf) {
         mctp_printf("msgq alloc failed!!\n");
@@ -425,30 +428,28 @@ uint8_t mctp_start(mctp *mctp_inst)
 
     k_msgq_init(&mctp_inst->mctp_tx_queue, msgq_buf, sizeof(mctp_tx_msg), MCTP_TX_QUEUE_SIZE);
 
-    osThreadAttr_t thread_attr = {0};
     /* create rx service */
-
-    /* the name len of osThreadAttr_t is only 16 bytes */
-    thread_attr.name = (const char *)mctp_inst->mctp_rx_task_name;
-    thread_attr.priority = MCTP_DEFAULT_THREAD_PRIORITY;
-    thread_attr.stack_size = MCTP_DEFAULT_THREAD_STACK_SIZE;
-    mctp_inst->mctp_rx_task_tid = osThreadNew(mctp_rx_task, (void *)mctp_inst, &thread_attr);
+    mctp_inst->mctp_rx_task_tid = k_thread_create(&mctp_inst->rx_task_thread_data,
+                                            rx_task_stack_area,
+                                            K_THREAD_STACK_SIZEOF(rx_task_stack_area),
+                                            mctp_rx_task,
+                                            mctp_inst, NULL, NULL,
+                                            7, 0, K_MSEC(1));
     if (!mctp_inst->mctp_rx_task_tid)
         goto error;
-    
-    /* let the thread can be terminated by osThreadTerminate */
-    osThreadDetach(mctp_inst->mctp_rx_task_tid);
-    
-    mctp_printf("mctp_inst->mctp_rx_task_tid = %p\n", mctp_inst->mctp_rx_task_tid);
+    k_thread_name_set(mctp_inst->mctp_rx_task_tid, mctp_inst->mctp_rx_task_name);
 
     /* create tx service */
-    thread_attr.name = (const char *)mctp_inst->mctp_tx_task_name;
-    mctp_inst->mctp_tx_task_tid = osThreadNew(mctp_tx_task, (void *)mctp_inst, &thread_attr);
+    mctp_inst->mctp_tx_task_tid = k_thread_create(&mctp_inst->tx_task_thread_data,
+                                            tx_task_stack_area,
+                                            K_THREAD_STACK_SIZEOF(tx_task_stack_area),
+                                            mctp_tx_task,
+                                            mctp_inst, NULL, NULL,
+                                            7, 0, K_MSEC(1));
+
     if (!mctp_inst->mctp_tx_task_tid)
         goto error;
-    osThreadDetach(mctp_inst->mctp_tx_task_tid);
-    
-    mctp_printf("mctp_inst->mctp_tx_task_tid = %p\n", mctp_inst->mctp_tx_task_tid);
+    k_thread_name_set(mctp_inst->mctp_tx_task_tid, mctp_inst->mctp_tx_task_name);
     
     mctp_inst->is_servcie_start = 1;
     return MCTP_SUCCESS;

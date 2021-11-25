@@ -129,8 +129,10 @@ typedef struct _mctp {
     endpoint_resolve ep_resolve;
 
     /* read/write task */
-    osThreadId_t mctp_rx_task_tid;
-    osThreadId_t mctp_tx_task_tid;
+    k_tid_t mctp_rx_task_tid;
+    k_tid_t mctp_tx_task_tid;
+    struct k_thread rx_task_thread_data;
+    struct k_thread tx_task_thread_data;
     uint8_t mctp_rx_task_name[MCTP_TASK_NAME_LEN];
     uint8_t mctp_tx_task_name[MCTP_TASK_NAME_LEN];
 

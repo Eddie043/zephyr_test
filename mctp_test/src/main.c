@@ -7,8 +7,12 @@
 #include <zephyr.h>
 #include <sys/printk.h>
 #include <cmsis_os2.h>
+#include <logging/log.h>
+#include <logging/log_ctrl.h>
 #include "mctp.h"
 #include "pldm.h"
+
+LOG_MODULE_REGISTER(mctp_test);
 
 #define MCTP_SMBUS_NUM 1
 
@@ -119,41 +123,41 @@ static uint8_t get_route_info(uint8_t dest_endpoint, void **mctp_inst, mctp_ext_
 
 static void main_gettid(void *args, uint8_t *buf, uint16_t len)
 {
-	pldm_printf("\n");
+	LOG_DBG("");
 }
 
 static void to_test(void *to_args)
 {
 	uint8_t *i = (uint8_t *)to_args;
-	pldm_printf("*i = %d\n", *i);
+	LOG_DBG("*i = %d", *i);
 }
 
 void main(void)
 {
-	mctp_printf("MCTP test\n");
+	LOG_DBG("MCTP test");
 
 	uint32_t i;
 	for (i = 0; i < MCTP_SMBUS_NUM; i++) {
 		mctp_smbus_port *p = smbus_port + i;
-		printk("smbus port %d\n", i);
-		printk("bus = %x, addr = %x\n", p->conf.smbus_conf.bus, p->conf.smbus_conf.addr);
+		LOG_DBG("smbus port %d", i);
+		LOG_DBG("bus = %x, addr = %x", p->conf.smbus_conf.bus, p->conf.smbus_conf.addr);
 
 		p->mctp_inst = mctp_init();
 		if (!p->mctp_inst) {
-			mctp_printf("mctp_init failed!!\n");
+			LOG_ERR("mctp_init failed!!");
 			continue;
 		}
 
 		uint8_t rc = mctp_set_medium_configure(p->mctp_inst, MCTP_MEDIUM_TYPE_SMBUS, p->conf);
-		mctp_printf("mctp_set_medium_configure %s\n", (rc == MCTP_SUCCESS)? "success": "failed");
+		LOG_DBG("mctp_set_medium_configure %s", (rc == MCTP_SUCCESS)? "success": "failed");
 
 		/* test get medium function */
 		MCTP_MEDIUM_TYPE medium_type = MCTP_MEDIUM_TYPE_UNKNOWN;
 		mctp_medium_conf medium_conf;
 		rc = mctp_get_medium_configure(p->mctp_inst, &medium_type, &medium_conf);
-		mctp_printf("mctp_get_medium_configure %s\n", (rc == MCTP_SUCCESS)? "success": "failed");
-		mctp_printf("medium_type = %d\n", medium_type);
-		mctp_printf("smbus bus = %x, addr = %x\n", medium_conf.smbus_conf.bus, medium_conf.smbus_conf.addr);
+		LOG_DBG("mctp_get_medium_configure %s", (rc == MCTP_SUCCESS)? "success": "failed");
+		LOG_DBG("medium_type = %d", medium_type);
+		LOG_DBG("smbus bus = %x, addr = %x", medium_conf.smbus_conf.bus, medium_conf.smbus_conf.addr);
 
 		mctp_reg_endpoint_resolve_func(p->mctp_inst, get_route_info);
 		mctp_reg_msg_rx_func(p->mctp_inst, mctp_msg_recv);

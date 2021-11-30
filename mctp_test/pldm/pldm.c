@@ -3,8 +3,11 @@
 #include <sys/printk.h>
 #include <sys/slist.h>
 #include <cmsis_os2.h>
+#include <logging/log.h>
 #include "mctp.h"
 #include "pldm.h"
+
+LOG_MODULE_REGISTER(pldm);
 
 #define STACKSIZE 1024
 #define PLDM_HDR_INST_ID_MASK 0x1F
@@ -48,7 +51,7 @@ static struct _pldm_handler_query_entry query_tbl[] = {
 static void list_monitor(void *pldm_p, void *dummy0, void *dummy1)
 {
     if (!pldm_p) {
-        pldm_printf("pldm is null\n");
+        LOG_ERR("pldm is null");
         return;
     }
 
@@ -61,7 +64,7 @@ static void list_monitor(void *pldm_p, void *dummy0, void *dummy1)
         k_msleep(PLDM_MSG_CHECK_PER_MS);
 
         if (k_mutex_lock(&pldm.list_mutex, K_MSEC(PLDM_RESP_MSG_PROC_MUTEX_TIMEOUT_MS))) {
-            pldm_printf("pldm mutex is locked over %d ms!!\n", PLDM_RESP_MSG_PROC_MUTEX_TIMEOUT_MS);
+            LOG_WRN("pldm mutex is locked over %d ms!!", PLDM_RESP_MSG_PROC_MUTEX_TIMEOUT_MS);
             continue;
         }
 
@@ -74,8 +77,8 @@ static void list_monitor(void *pldm_p, void *dummy0, void *dummy1)
             req_pldm_msg *p = (req_pldm_msg *)node;
 
             if ((p->exp_timeout_time <= cur_uptime)) {
-                pldm_printf("pldm msg timeout!!\n");
-                pldm_printf("type %x, cmd %x, inst_id %x\n", p->hdr.pldm_type, p->hdr.cmd, p->hdr.inst_id);
+                LOG_INF("pldm msg timeout!!");
+                LOG_INF("type %x, cmd %x, inst_id %x", p->hdr.pldm_type, p->hdr.cmd, p->hdr.inst_id);
                 sys_slist_remove(&pldm.non_resp_list, pre_node, node);
 
                 if (p->to_fn)
@@ -102,7 +105,7 @@ static uint8_t pldm_resp_msg_proc(void *mctp_p, uint8_t *buf, uint32_t len, mctp
     sys_snode_t *found_node = NULL;
 
     if (k_mutex_lock(&pldm.list_mutex, K_MSEC(PLDM_RESP_MSG_PROC_MUTEX_TIMEOUT_MS))) {
-        pldm_printf("pldm mutex is locked over %d ms!!\n", PLDM_RESP_MSG_PROC_MUTEX_TIMEOUT_MS);
+        LOG_WRN("pldm mutex is locked over %d ms!!", PLDM_RESP_MSG_PROC_MUTEX_TIMEOUT_MS);
         return PLDM_ERROR;
     }
 
@@ -140,12 +143,12 @@ uint8_t mctp_pldm_cmd_handler(void *mctp_p, uint8_t *buf, uint32_t len, mctp_ext
 		return PLDM_ERROR;
 
     pldm_hdr *hdr = (pldm_hdr *)buf;
-    pldm_printf("sizeof(pldm_hdr) = %x\n", sizeof(pldm_hdr));
-    pldm_printf("msg_type = %d\n", hdr->msg_type);
-    pldm_printf("req_d_id = 0x%x\n", hdr->req_d_id);
-    pldm_printf("pldm_type = 0x%x\n", hdr->pldm_type);
-    pldm_printf("ver = 0x%x\n", hdr->ver);
-    pldm_printf("cmd = 0x%x\n", hdr->cmd);
+    LOG_DBG("sizeof(pldm_hdr) = %x", sizeof(pldm_hdr));
+    LOG_DBG("msg_type = %d", hdr->msg_type);
+    LOG_DBG("req_d_id = 0x%x", hdr->req_d_id);
+    LOG_DBG("pldm_type = 0x%x", hdr->pldm_type);
+    LOG_DBG("ver = 0x%x", hdr->ver);
+    LOG_DBG("cmd = 0x%x", hdr->cmd);
 
     /* the message is a response, check if any callback function should be invoked */
     if (!hdr->rq) {
@@ -194,7 +197,7 @@ uint8_t mctp_pldm_cmd_handler(void *mctp_p, uint8_t *buf, uint32_t len, mctp_ext
 send_msg:
     /* send the pldm response data */
     resp_len = sizeof(resp.hdr) + resp.len;
-    pldm_printf("resp_len = %d\n", resp_len);
+    LOG_DBG("resp_len = %d", resp_len);
 	return mctp_send_msg(mctp_p, (uint8_t *)&resp, resp_len, ext_params);
 }
 
@@ -218,14 +221,14 @@ uint8_t mctp_pldm_send_msg_with_timeout(void *mctp_p, pldm_msg *msg, mctp_ext_pa
     }
 
     uint16_t send_len = sizeof(msg->hdr) + msg->len;
-    pldm_printf("msg->hdr.inst_id = %x\n", msg->hdr.inst_id);
-    pldm_printf("msg->hdr.pldm_type = %x\n", msg->hdr.pldm_type);
-    pldm_printf("msg->hdr.cmd = %x\n", msg->hdr.cmd);
-    print_data_hex((uint8_t *)msg, send_len);
+    LOG_DBG("msg->hdr.inst_id = %x", msg->hdr.inst_id);
+    LOG_DBG("msg->hdr.pldm_type = %x", msg->hdr.pldm_type);
+    LOG_DBG("msg->hdr.cmd = %x", msg->hdr.cmd);
+    LOG_HEXDUMP_DBG((uint8_t *)msg, send_len, "pldm data");
 	uint8_t rc = mctp_send_msg(mctp_p, (uint8_t *)msg, send_len, ext_param);
 
     if (rc == MCTP_ERROR) {
-        pldm_printf("mctp_send_msg error!!\n");
+        LOG_WRN("mctp_send_msg error!!");
         return PLDM_ERROR;
     }
 
@@ -233,7 +236,7 @@ uint8_t mctp_pldm_send_msg_with_timeout(void *mctp_p, pldm_msg *msg, mctp_ext_pa
         /* if the msg is sending request, should store the msg/resp_fn/cb_args, which are used to handle the response data */
         req_pldm_msg *req_msg = (req_pldm_msg *)k_malloc(sizeof(*req_msg));
         if (!req_msg) {
-            pldm_printf("malloc FAILED!!\n");
+            LOG_WRN("malloc FAILED!!");
             return PLDM_ERROR;
         }
         memset(req_msg, 0, sizeof(*req_msg));
@@ -262,64 +265,11 @@ uint8_t mctp_pldm_send_msg(void *mctp_p, pldm_msg *msg, mctp_ext_param ext_param
                         void (*resp_fn)(void *, uint8_t *, uint16_t), void *cb_args)
 {
     return mctp_pldm_send_msg_with_timeout(mctp_p, msg, ext_param, resp_fn, cb_args, 0, NULL, NULL);
-#if 0
-    if (!mctp_p || !msg)
-        return PLDM_ERROR;
-
-    /* the request should be set inst_id/msg_type/mctp_tag_owner in the header */
-    if (msg->hdr.rq) {
-        static uint8_t inst_id;
-
-        /* set pldm header */
-        msg->hdr.inst_id = (inst_id++) & PLDM_HDR_INST_ID_MASK;
-        msg->hdr.msg_type = MCTP_MSG_TYPE_PLDM;
-        
-        /* set mctp extra parameters */
-        ext_param.tag_owner = 1;
-    }
-
-    uint16_t send_len = sizeof(msg->hdr) + msg->len;
-    pldm_printf("msg->hdr.inst_id = %x\n", msg->hdr.inst_id);
-    pldm_printf("msg->hdr.pldm_type = %x\n", msg->hdr.pldm_type);
-    pldm_printf("msg->hdr.cmd = %x\n", msg->hdr.cmd);
-    print_data_hex((uint8_t *)msg, send_len);
-	uint8_t rc = mctp_send_msg(mctp_p, (uint8_t *)msg, send_len, ext_param);
-
-    if (rc == MCTP_ERROR) {
-        pldm_printf("mctp_send_msg error!!\n");
-        return PLDM_ERROR;
-    }
-
-    if (msg->hdr.rq) {
-        /* if the msg is sending request, should store the msg/resp_fn/cb_args, which are used to handle the response data */
-        req_pldm_msg *req_msg = (req_pldm_msg *)k_malloc(sizeof(*req_msg));
-        if (!req_msg) {
-            pldm_printf("malloc FAILED!!\n");
-            return PLDM_ERROR;
-        }
-
-        req_msg->hdr = msg->hdr;
-        req_msg->resp_fn = resp_fn;
-        req_msg->cb_args = cb_args;
-        
-        /* the uptime is int64_t millisecond, don't care overflow */
-        req_msg->exp_timeout_time = k_uptime_get() + PLDM_MSG_TIMEOUT_MS;
-
-        /* TODO: should set timeout? */
-        k_mutex_lock(&pldm.list_mutex, K_FOREVER);
-        sys_slist_append(&pldm.non_resp_list, &req_msg->node);
-        k_mutex_unlock(&pldm.list_mutex);
-    }
-
-    /* store the msg for waiting response */
-    return PLDM_SUCCESS;
-#endif
 }
 
 uint8_t pldm_init(void)
 {
     sys_slist_init(&pldm.non_resp_list);
-    
     if (k_mutex_init(&pldm.list_mutex))
         return PLDM_ERROR;
     
@@ -332,7 +282,7 @@ uint8_t pldm_init(void)
     );
 
     if (!pldm.monitor_task) {
-        pldm_printf("create pldm monitor task failed!!\n");
+        LOG_ERR("create pldm monitor task failed!!");
         return PLDM_ERROR;
     }
 

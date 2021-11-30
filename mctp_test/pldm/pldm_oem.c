@@ -4,7 +4,10 @@
 #include <sys/util.h>
 #include <sys/slist.h>
 #include <cmsis_os2.h>
+#include <logging/log.h>
 #include "pldm.h"
+
+LOG_MODULE_DECLARE(pldm);
 
 static uint8_t cmd_echo(uint8_t *buf, uint16_t len, uint8_t *resp, uint16_t *resp_len)
 {

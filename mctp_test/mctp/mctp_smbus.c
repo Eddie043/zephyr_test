@@ -5,7 +5,10 @@
 #include <sys/printk.h>
 #include <sys/crc.h>
 #include <cmsis_os2.h>
+#include <logging/log.h>
 #include "mctp.h"
+
+LOG_MODULE_DECLARE(mctp);
 
 #define MCTP_SMBUS_PEC_SIZE 1
 
@@ -26,7 +29,7 @@ static uint8_t cal_pec(uint8_t dest_addr, uint8_t *buf, uint32_t len, uint8_t *p
     pec_buf[0] = dest_addr;
     memcpy(pec_buf + 1, buf, len - 1);
 
-    print_data_hex(pec_buf, sizeof(pec_buf));
+    LOG_HEXDUMP_DBG(pec_buf, sizeof(pec_buf), "cal_pec");
 
     *pec = crc8(pec_buf, sizeof(pec_buf), 0x07, 0x00, false);
     return MCTP_SUCCESS;
@@ -44,8 +47,8 @@ static bool is_pec_vaild(uint8_t dest_addr, uint8_t *buf, uint32_t len)
     uint8_t exp_pec = buf[len -1];
 
     if (pec != exp_pec) {
-        mctp_printf("pec error dest_addr %x, cal = %x, exp = %x\n", dest_addr, pec, exp_pec);
-        print_data_hex(buf, sizeof(len));
+        LOG_WRN("pec error dest_addr %x, cal = %x, exp = %x", dest_addr, pec, exp_pec);
+        LOG_HEXDUMP_WRN(buf, sizeof(len), "is_pec_vaild");
     }
 
     return (pec == exp_pec) ? true : false;
@@ -118,23 +121,19 @@ static uint16_t mctp_smbus_write(void *mctp_p, uint8_t *buf, uint32_t len, mctp_
     if (extra_data.type != MCTP_MEDIUM_TYPE_SMBUS)
         return 0;
     
-    if (MCTP_DEBUG)
-        print_data_hex(buf, len);
+    LOG_HEXDUMP_DBG(buf, len, "mctp_smbus_write receive data");
 
     /* send len = 1(mctp cmd code 0x0F) + 1(byte count) + 1(src addr) + len(mctp data) + 1(*pec, if exist) */
     uint32_t send_len = len + 4;
     uint8_t send_buf[send_len];
     uint8_t rc = make_send_buf(mctp_inst, send_buf, send_len, buf, len, extra_data);
     if (rc == MCTP_ERROR) {
-        mctp_printf("make send buf failed!!\n");
+        LOG_WRN("make send buf failed!!");
         return 0;
     }
 
-    if (MCTP_DEBUG) {
-        mctp_printf("smbus_ext_param addr = %x\n", extra_data.smbus_ext_param.addr);
-        mctp_printf("send packet =====================\n");
-        print_data_hex(send_buf, send_len);
-    }
+    LOG_DBG("smbus_ext_param addr = %x", extra_data.smbus_ext_param.addr);
+    LOG_HEXDUMP_DBG(send_buf, send_len, "mctp_smbus_write make header");
     
     /* TODO: write data to smbus */
 

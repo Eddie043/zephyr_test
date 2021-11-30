@@ -4,7 +4,10 @@
 #include <sys/util.h>
 #include <sys/slist.h>
 #include <cmsis_os2.h>
+#include <logging/log.h>
 #include "pldm.h"
+
+LOG_MODULE_DECLARE(pldm);
 
 uint8_t set_tid(uint8_t *buf, uint16_t len, uint8_t *resp, uint16_t *resp_len)
 {
@@ -21,14 +24,12 @@ uint8_t set_tid(uint8_t *buf, uint16_t len, uint8_t *resp, uint16_t *resp_len)
 
 uint8_t get_tid(uint8_t *buf, uint16_t len, uint8_t *resp, uint16_t *resp_len)
 {
-    pldm_printf("\n");
     if (!buf || !resp || !resp_len)
         return PLDM_ERROR;
 
-    pldm_printf("\n");
     struct _get_tid_resp *p = (struct _get_tid_resp *)resp;
     p->completion_code = PLDM_BASE_CODES_SUCCESS;
-    p->tid = 0x78;
+    p->tid = DEFAULT_TID;
     *resp_len = sizeof(*p);
     return PLDM_SUCCESS;
 }

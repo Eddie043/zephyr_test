@@ -26,12 +26,6 @@ extern "C" {
 
 #define MCTP_MAX_MSG_TAG_NUM 8
 
-#define mctp_printf(format, s...) \
-	do { \
-        if (MCTP_DEBUG) \
-		    printk("[%lld][%s::%s::%d]" format, k_uptime_get(), __FILE__, __func__, __LINE__, ## s); \
-	} while (0)
-
 typedef enum {
 	MCTP_MSG_TYPE_CTRL = 0x00,
 	MCTP_MSG_TYPE_PLDM,
@@ -148,21 +142,6 @@ typedef struct _mctp {
     /* the callback when recevie mctp data */
     mctp_fn_cb rx_cb;
 } mctp;
-
-/* debug util */
-static inline void print_data_hex(uint8_t *buf, uint32_t len)
-{
-    if (!buf || !len)
-        return;
-
-    uint16_t i;
-    for (i = 0; i < len; i++) {
-        if (!(i % 16) && i)
-            printk("\n");
-        printk("%02X ", *(buf + i));
-    }
-    printk("\n");
-}
 
 /* public function */
 mctp *mctp_init(void);

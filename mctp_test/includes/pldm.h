@@ -29,12 +29,6 @@ extern "C" {
 
 #define PLDM_MAX_DATA_SIZE 256
 
-#define pldm_printf(format, s...) \
-	do { \
-        if (PLDM_DEBUG) \
-		    printk("[%llu][%s::%s::%d]" format, k_uptime_get(), __FILE__, __func__, __LINE__, ## s); \
-	} while (0)
-
 typedef uint8_t (*pldm_cmd_proc_fn)(uint8_t *, uint16_t, uint8_t *, uint16_t *);
 
 typedef enum {

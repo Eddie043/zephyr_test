@@ -5,7 +5,10 @@
 #include <zephyr.h>
 #include <sys/printk.h>
 #include <cmsis_os2.h>
+#include <logging/log.h>
 #include "mctp.h"
+
+LOG_MODULE_REGISTER(mctp);
 
 #define MCTP_DEFAULT_THREAD_STACK_SIZE 0x1000
 #define MCTP_DEFAULT_THREAD_PRIORITY osPriorityNormal
@@ -106,11 +109,11 @@ static uint8_t bridge_msg(mctp *mctp_inst, uint8_t *buf, uint16_t len)
     mctp_hdr *hdr = (mctp_hdr *)buf;
     uint8_t rc = mctp_inst->ep_resolve(hdr->dest_ep, (void **)&target_mctp, &target_ext_params);
     if (rc != MCTP_SUCCESS) {
-        mctp_printf("can't bridge endpoint %x\n", hdr->dest_ep);
+        LOG_ERR("can't bridge endpoint %x", hdr->dest_ep);
         return MCTP_ERROR;
     }
 
-    mctp_printf("rc = %d, bridget msg to mctp = %p\n", rc, target_mctp);
+    LOG_DBG("rc = %d, bridget msg to mctp = %p", rc, target_mctp);
     mctp_bridge_msg(target_mctp, buf, len, target_ext_params);
     return MCTP_SUCCESS;
 }
@@ -134,19 +137,16 @@ static uint8_t mctp_pkt_assembling(mctp *mctp_inst, uint8_t *buf, uint16_t len)
         *ofs_p = 0;
 
         *buf_p = (uint8_t *)k_malloc(MSG_ASSEMBLY_BUF_SIZE);
-        printk("*buf_p = %p\n", *buf_p);
         if (!*buf_p) {
-            mctp_printf("cannot create memory...\n");
+            LOG_WRN("cannot create memory...\n");
             return MCTP_ERROR;
         }
         memset(*buf_p, 0, MSG_ASSEMBLY_BUF_SIZE);
     }
 
-    printk("*buf_p + *ofs_p = %p\n", *buf_p + *ofs_p);
     memcpy(*buf_p + *ofs_p, buf + sizeof(hdr), len - sizeof(hdr));
     *ofs_p += len - sizeof(hdr);
 
-    mctp_printf("*ofs_p = %d\n", *ofs_p);
     return MCTP_SUCCESS;
 }
 
@@ -154,17 +154,17 @@ static uint8_t mctp_pkt_assembling(mctp *mctp_inst, uint8_t *buf, uint16_t len)
 static void mctp_rx_task(void *arg, void *dummy0, void *dummy1)
 {
     if (!arg) {
-        mctp_printf("mctp_rx_task without mctp_inst!\n");
+        LOG_WRN("mctp_rx_task without mctp_inst!");
         return;
     }
     
     mctp *mctp_inst = (mctp *)arg;
     if (!mctp_inst->read_data) {
-        mctp_printf("mctp_rx_task without medium read function!\n");
+        LOG_WRN("mctp_rx_task without medium read function!");
         return;
     }
 
-    mctp_printf("mctp_rx_task start %p!\n", mctp_inst);
+    LOG_DBG("mctp_rx_task start %p", mctp_inst);
     while (1) {
         k_msleep(1000);
 
@@ -175,11 +175,10 @@ static void mctp_rx_task(void *arg, void *dummy0, void *dummy1)
         if (!read_len)
             continue;
 
-        if (0)
-            print_data_hex(read_buf, read_len);
+        LOG_HEXDUMP_DBG(read_buf, read_len, "mctp receive data");
 
         mctp_hdr *hdr = (mctp_hdr *)read_buf;
-        mctp_printf("dest_ep = %x, src_ep = %x, flags = %x\n", hdr->dest_ep, hdr->src_ep, hdr->flags_seq_to_tag);
+        LOG_DBG("dest_ep = %x, src_ep = %x, flags = %x\n", hdr->dest_ep, hdr->src_ep, hdr->flags_seq_to_tag);
 
         /* set the tranport layer extra parameters */
         ext_param.msg_tag = hdr->msg_tag;
@@ -210,7 +209,7 @@ static void mctp_rx_task(void *arg, void *dummy0, void *dummy1)
                 p = mctp_inst->temp_msg_buf[hdr->msg_tag].buf;
                 len = mctp_inst->temp_msg_buf[hdr->msg_tag].ofs;
 
-                print_data_hex(p, len);
+                LOG_HEXDUMP_DBG(p, len, "mctp assembly data");
             }
 
             /* handle the mctp messsage */
@@ -231,18 +230,18 @@ static void mctp_rx_task(void *arg, void *dummy0, void *dummy1)
 static void mctp_tx_task(void *arg, void *dummy0, void *dummy1)
 {
     if (!arg) {
-        mctp_printf("mctp_tx_task without mctp_inst!\n");
+        LOG_WRN("mctp_tx_task without mctp_inst!");
         return;
     }
     
     mctp *mctp_inst = (mctp *)arg;
 
     if (!mctp_inst->write_data) {
-        mctp_printf("mctp_tx_task without medium write function!\n");
+        LOG_WRN("mctp_tx_task without medium write function!");
         return;
     }
 
-    mctp_printf("mctp_tx_task start %p!\n", mctp_inst);
+    LOG_INF("mctp_tx_task start %p!", mctp_inst);
     while (1) {
         mctp_tx_msg mctp_msg = {0};
         osStatus_t rc = k_msgq_get(&mctp_inst->mctp_tx_queue, &mctp_msg, K_FOREVER);
@@ -257,10 +256,8 @@ static void mctp_tx_task(void *arg, void *dummy0, void *dummy1)
             continue;
         }
 
-        if (0) {
-            mctp_printf("tx endpoint %x\n", mctp_msg.ext_param.ep);
-            print_data_hex(mctp_msg.buf, mctp_msg.len);
-        }
+        LOG_DBG("tx endpoint %x", mctp_msg.ext_param.ep);
+        LOG_HEXDUMP_DBG(mctp_msg.buf, mctp_msg.len, "mctp tx task receive data");
 
         /* bridge meesage alread has the mctp transport header, so doesn't need to make header */
         /* bridge message also doesn't need to split packet */
@@ -275,8 +272,8 @@ static void mctp_tx_task(void *arg, void *dummy0, void *dummy1)
         uint16_t max_msg_size = mctp_inst->max_msg_size;
         uint8_t i;
         uint8_t split_pkt_num = (mctp_msg.len / max_msg_size) + ((mctp_msg.len % max_msg_size)? 1: 0);
-        mctp_printf("mctp_msg.len = %d\n", mctp_msg.len);
-        mctp_printf("split_pkt_num = %d\n", split_pkt_num);
+        LOG_DBG("mctp_msg.len = %d", mctp_msg.len);
+        LOG_DBG("split_pkt_num = %d", split_pkt_num);
         for (i = 0; i < split_pkt_num; i++) {
             uint8_t buf[max_msg_size + MCTP_TRANSPORT_HEADER_SIZE];
             mctp_hdr *hdr = (mctp_hdr *)buf;
@@ -306,8 +303,8 @@ static void mctp_tx_task(void *arg, void *dummy0, void *dummy1)
             hdr->src_ep = mctp_inst->endpoint;
             hdr->hdr_ver = MCTP_HDR_HDR_VER;
 
-            mctp_printf("i = %d, cp_msg_size = %d\n", i, cp_msg_size);
-            mctp_printf("hdr->flags_seq_to_tag = %x\n", hdr->flags_seq_to_tag);
+            LOG_DBG("i = %d, cp_msg_size = %d", i, cp_msg_size);
+            LOG_DBG("hdr->flags_seq_to_tag = %x", hdr->flags_seq_to_tag);
             memcpy(buf + MCTP_TRANSPORT_HEADER_SIZE, mctp_msg.buf + i * max_msg_size, cp_msg_size);
             mctp_inst->write_data(mctp_inst, buf, cp_msg_size + MCTP_TRANSPORT_HEADER_SIZE, mctp_msg.ext_param);
         }
@@ -333,8 +330,7 @@ mctp *mctp_init(void)
     mctp_inst->max_msg_size = MCTP_DEFAULT_MSG_MAX_SIZE;
     mctp_inst->endpoint = MCTP_DEFAULT_ENDPOINT;
 
-    if (MCTP_DEBUG)
-        mctp_printf("mctp_inst = %p\n", mctp_inst);
+    LOG_DBG("mctp_inst = %p", mctp_inst);
     return mctp_inst;
 }
 
@@ -344,8 +340,7 @@ uint8_t mctp_deinit(mctp *mctp_inst)
     if (!mctp_inst)
         return MCTP_ERROR;
 
-    if (MCTP_DEBUG)
-        mctp_printf("mctp_inst = %p\n", mctp_inst);
+    LOG_DBG("mctp_inst = %p", mctp_inst);
 
     mctp_stop(mctp_inst);
     mctp_medium_deinit(mctp_inst);
@@ -414,7 +409,7 @@ uint8_t mctp_start(mctp *mctp_inst)
         return MCTP_ERROR;
     
     if (mctp_inst->is_servcie_start) {
-        mctp_printf("The mctp_inst is already start!\n");
+        LOG_WRN("The mctp_inst is already start!");
         return MCTP_ERROR;
     }
 
@@ -422,7 +417,7 @@ uint8_t mctp_start(mctp *mctp_inst)
 
     uint8_t *msgq_buf = (uint8_t *)k_malloc(MCTP_TX_QUEUE_SIZE * sizeof(mctp_tx_msg));
     if (!msgq_buf) {
-        mctp_printf("msgq alloc failed!!\n");
+        LOG_WRN("msgq alloc failed!!");
         goto error;
     }
 
@@ -455,7 +450,7 @@ uint8_t mctp_start(mctp *mctp_inst)
     return MCTP_SUCCESS;
 
 error:
-    mctp_printf("mctp_start failed!!\n");
+    LOG_ERR("mctp_start failed!!");
     mctp_stop(mctp_inst);
     return MCTP_ERROR;
 }
@@ -466,7 +461,7 @@ uint8_t mctp_bridge_msg(mctp *mctp_inst, uint8_t *buf, uint16_t len, mctp_ext_pa
         return MCTP_ERROR;
     
     if (!mctp_inst->is_servcie_start) {
-        mctp_printf("The mctp_inst isn't start service!\n");
+        LOG_WRN("The mctp_inst isn't start service!");
         return MCTP_ERROR;
     }
 
@@ -478,7 +473,6 @@ uint8_t mctp_bridge_msg(mctp *mctp_inst, uint8_t *buf, uint16_t len, mctp_ext_pa
         goto error;
     memcpy(mctp_msg.buf, buf, len);
 
-    mctp_printf("sizeof(ext_param) = %d\n", sizeof(ext_param));
     mctp_msg.ext_param = ext_param;
 
     int rc = k_msgq_put(&mctp_inst->mctp_tx_queue, &mctp_msg, K_NO_WAIT);
@@ -498,7 +492,7 @@ uint8_t mctp_send_msg(mctp *mctp_inst, uint8_t *buf, uint16_t len, mctp_ext_para
         return MCTP_ERROR;
     
     if (!mctp_inst->is_servcie_start) {
-        mctp_printf("The mctp_inst isn't start service!\n");
+        LOG_WRN("The mctp_inst isn't start service!");
         return MCTP_ERROR;
     }
 

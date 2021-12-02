@@ -63,7 +63,7 @@ static void list_monitor(void *pldm_p, void *dummy0, void *dummy1)
     while (1) {
         k_msleep(PLDM_MSG_CHECK_PER_MS);
 
-        if (k_mutex_lock(&pldm.list_mutex, K_MSEC(PLDM_RESP_MSG_PROC_MUTEX_TIMEOUT_MS))) {
+        if (k_mutex_lock(&pldm_inst->list_mutex, K_MSEC(PLDM_RESP_MSG_PROC_MUTEX_TIMEOUT_MS))) {
             LOG_WRN("pldm mutex is locked over %d ms!!", PLDM_RESP_MSG_PROC_MUTEX_TIMEOUT_MS);
             continue;
         }
@@ -79,7 +79,7 @@ static void list_monitor(void *pldm_p, void *dummy0, void *dummy1)
             if ((p->exp_timeout_time <= cur_uptime)) {
                 LOG_INF("pldm msg timeout!!");
                 LOG_INF("type %x, cmd %x, inst_id %x", p->hdr.pldm_type, p->hdr.cmd, p->hdr.inst_id);
-                sys_slist_remove(&pldm.non_resp_list, pre_node, node);
+                sys_slist_remove(&pldm_inst->non_resp_list, pre_node, node);
 
                 if (p->to_fn)
                     p->to_fn(p->to_fn_args);
@@ -89,7 +89,7 @@ static void list_monitor(void *pldm_p, void *dummy0, void *dummy1)
                 pre_node = node;
             }
         }
-        k_mutex_unlock(&pldm.list_mutex);
+        k_mutex_unlock(&pldm_inst->list_mutex);
     }
 }
 
